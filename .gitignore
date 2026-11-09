@@ -1,0 +1,28 @@
+# Dependencias y builds (por si algún día se agregan)
+node_modules/
+dist/
+.cache/
+
+# Secretos: la anon/publishable key de js/config.js es pública por diseño,
+# pero nunca subas la service_role / secret key ni archivos .env
+.env
+.env.*
+!.env.example
+*.pem
+
+# Supabase CLI (local)
+supabase/.temp/
+supabase/.branches/
+
+# Editor y sistema
+.vscode/
+.idea/
+.claude/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
