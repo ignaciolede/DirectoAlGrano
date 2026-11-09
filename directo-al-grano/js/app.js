@@ -166,8 +166,7 @@
         '<p>Todavía no reseñaste nada. El primer cortado corre por tu cuenta.</p>' +
         '<a class="dag-btn" href="#/nueva">' + ic('plus') + 'Nueva review</a>' +
         (S.hasLegacy() ? '<button type="button" class="dag-btn dag-btn--secondary" id="rk-legacy">Subir lo que tenías en este navegador</button>' : '') +
-        '<button type="button" class="dag-btn dag-btn--ghost" id="rk-seed">Ver con datos de ejemplo</button></div>';
-      view.querySelector('#rk-seed').addEventListener('click', function () { S.seed(); render(); toast('Listo: siete cafeterías de ejemplo. Las borrás desde Ajustes.'); });
+        '</div>';
       var lg = view.querySelector('#rk-legacy');
       if (lg) lg.addEventListener('click', function () {
         try { S.importLegacy(); render(); toast('Listo: tus reviews ya están en tu cuenta.'); }
@@ -875,8 +874,7 @@
       '<div class="dag-section"><p class="dag-label">Tus datos</p><p class="app-hint" style="margin:0">Se guardan en tu cuenta y los ves desde cualquier dispositivo. Igual podés bajarte una copia.</p>' +
       '<div class="app-sheet-actions"><button type="button" class="dag-btn dag-btn--secondary" id="st-export"' + (hasData ? '' : ' disabled') + '>Exportar</button>' +
       '<label class="dag-btn dag-btn--secondary" tabindex="0">Importar<input type="file" accept="application/json,.json" id="st-import" hidden></label></div>' +
-      (hasData ? '<button type="button" class="dag-btn dag-btn--ghost app-btn-danger-ghost" id="st-reset">Empezar de cero</button>'
-        : '<button type="button" class="dag-btn dag-btn--ghost" id="st-seed">Cargar datos de ejemplo</button>') + '</div>',
+      (hasData ? '<button type="button" class="dag-btn dag-btn--ghost app-btn-danger-ghost" id="st-reset">Empezar de cero</button>' : '') + '</div>',
       function (sheet, close) {
         sheet.querySelector('#st-theme').addEventListener('click', function (e) {
           var c = e.target.closest('[data-t]'); if (!c) return;
@@ -907,8 +905,6 @@
             if (ok) { S.reset(); go('#/ranking', true); render(); toast('Todo en blanco.'); }
           });
         });
-        var sd = sheet.querySelector('#st-seed');
-        if (sd) sd.addEventListener('click', function () { S.seed(); close(); render(); toast('Listo: siete cafeterías de ejemplo.'); });
         var lo = sheet.querySelector('#st-logout');
         lo.addEventListener('click', function () {
           lo.disabled = true; lo.textContent = 'Cerrando…';

@@ -53,7 +53,7 @@ En Supabase, **Authentication → URL Configuration** tiene que tener como *Site
 - `index.html`: entrada y tab bar.
 - `app.css`: solo la cáscara (columna, sheets, toast, mapa y resultados de búsqueda). Los componentes son los `dag-` de `bundle.css`.
 - `js/config.js`: URL y anon key de Supabase.
-- `js/store.js`: sesión (Supabase Auth), datos, promedios, ranking y datos de ejemplo. Al entrar trae todo a memoria; cada cambio se aplica al instante y se sube a Supabase en una cola ordenada.
+- `js/store.js`: sesión (Supabase Auth), datos, promedios, y ranking. Al entrar trae todo a memoria; cada cambio se aplica al instante y se sube a Supabase en una cola ordenada.
 - `supabase/schema.sql`: tablas y políticas RLS.
 - `js/geo.js`: búsqueda de lugares y búsqueda inversa con [Photon](https://photon.komoot.io), el buscador de OpenStreetMap: no pide clave y prioriza lo cercano y las cafeterías.
 - `js/map.js`: Leaflet con tiles de OpenStreetMap, filtro de color por tema y pines `dag-pin`.

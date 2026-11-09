@@ -202,7 +202,7 @@ input[type="date"].dag-input { appearance: none; -webkit-appearance: none; }
 .app-sheet-title { font-size: 22px; line-height: 28px; margin-bottom: var(--space-4); }
 .app-sheet-text { margin: -8px 0 var(--space-4); }
 .app-sheet-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
-.app-modal .app-btn-danger-ghost, #st-seed { margin-top: var(--space-2); justify-self: start; }
+.app-modal .app-btn-danger-ghost { margin-top: var(--space-2); justify-self: start; }
 
 /* ---------- toast ---------- */
 .app-toast {

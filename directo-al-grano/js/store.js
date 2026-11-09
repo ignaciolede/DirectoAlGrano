@@ -105,13 +105,11 @@
     }).catch(report);
   }
 
-  // Durante seed/import se juntan las filas y se mandan de a una tanda por tabla.
-  var batch = null;
   function insert(table, obj) {
-    if (batch) { batch[table].push(obj); return; }
     var row = TO_ROW[table](obj);
     run([function () { return sb.from(table).insert(row); }]);
   }
+  // Import: una tanda por tabla.
   function insertSteps(b) {
     return ['cafes', 'visits', 'wishlist'].filter(function (t) { return b[t].length; }).map(function (t) {
       return function () { return sb.from(t).insert(b[t].map(TO_ROW[t])); };
@@ -319,58 +317,6 @@
     return true;
   }
 
-  // ---------- datos de ejemplo (cafeterías inventadas en direcciones reales de CABA) ----------
-  function seed() {
-    batch = { cafes: [], visits: [], wishlist: [] };
-    var A = function (a) { return { cafe: a[0], lugar: a[1], atencion: a[2], precio: a[3], trabajo: a[4] }; };
-    var sample = [
-      ['Grano Norte', 'Colegiales', 'Av. Federico Lacroze 3100', -34.57694, -58.4487, [
-        [10, 3, 'Flat white', 'Etiopía', 'Claro', 'Máquina', [5, 4, 5, 3, 4], 'Dulce, cítrico, sin amargor. Lugar chico pero con buena luz. Volvería a trabajar un rato.', ['Medialuna de manteca', 8, 'Hojaldrada, recién horneada.']],
-        [9, 24, 'Filtro', 'Colombia', 'Medio', 'V60', [5, 4, 4, 3, 4], 'El V60 de Colombia, redondo. Se llenó al mediodía.'],
-        [10, 51, 'Flat white', 'Etiopía', 'Claro', 'Máquina', [5, 5, 5, 3, 4], '']
-      ]],
-      ['Taza Lenta', 'Villa Crespo', 'Thames 980', -34.59640, -58.43560, [
-        [9, 10, 'Filtro', 'Etiopía', 'Claro', 'V60', [5, 4, 4, 3, 5], 'Te explican el café sin hacerte sentir un ignorante. Mesas largas, buenos enchufes.'],
-        [9, 40, 'Espresso', 'Colombia', 'Medio', 'Máquina', [4, 4, 5, 3, 5], '']
-      ]],
-      ['Molienda', 'Palermo', 'Gorriti 4800', -34.59085, -58.42913, [
-        [9, 6, 'Cortado', 'Brasil', 'Medio', 'Máquina', [4, 4, 4, 4, 3], 'Cortado como tiene que ser. Mucho ruido a la tarde.', ['Tostado de jamón y queso', 7, 'Pan de molde de verdad.']],
-        [8, 19, 'Cortado', 'Brasil', 'Medio', 'Máquina', [4, 3, 4, 4, 3], ''],
-        [8, 33, 'Latte', 'Blend', 'Medio', 'Máquina', [4, 4, 3, 4, 3], ''],
-        [9, 70, 'Cortado', 'Brasil', 'Medio', 'Máquina', [5, 4, 4, 4, 3], '']
-      ]],
-      ['Café Brío', 'Chacarita', 'Av. Dorrego 1200', -34.58771, -58.44585, [
-        [8, 14, 'Espresso', 'Blend', 'Oscuro', 'Máquina', [4, 3, 4, 4, 2], 'Espresso intenso, para tomar parado en la barra.']
-      ]],
-      ['La Tostadora', 'San Telmo', 'Defensa 870', -34.61813, -58.37155, [
-        [7, 28, 'Latte', 'Brasil', 'Medio', 'Máquina', [3, 5, 4, 3, 3], 'Lindo lugar, el latte un poco lavado.', ['Budín de limón', 9, 'Lo mejor de la visita.']],
-        [7, 90, 'Cortado', 'No sé', 'Oscuro', 'Máquina', [3, 5, 3, 3, 3], '']
-      ]],
-      ['Cortado Club', 'Almagro', 'Av. Corrientes 3900', -34.60345, -58.41939, [
-        [6, 45, 'Cortado', 'No sé', 'Oscuro', 'Máquina', [3, 3, 3, 4, 2], 'Zafa. Barato y cerca del laburo.']
-      ]],
-      ['Niebla', 'Recoleta', 'Ayacucho 1600', -34.58880, -58.39300, [
-        [4, 60, 'Cold brew', 'Colombia', 'Medio', 'Cold brew', [2, 4, 2, 1, 3], 'Cold brew aguado y caro. La terraza está buena, igual no vuelvo.']
-      ]]
-    ];
-    sample.forEach(function (s) {
-      var c = addCafe({ name: s[0], barrio: s[1], address: s[2], lat: s[3], lng: s[4] });
-      s[5].forEach(function (v) {
-        addVisit({
-          cafeId: c.id, score: v[0], date: today(v[1]), drink: v[2], origin: v[3], roast: v[4], method: v[5],
-          aspects: A(v[6]), text: v[7],
-          food: v[8] ? { name: v[8][0], score: v[8][1], text: v[8][2] } : null
-        });
-      });
-    });
-    var w1 = addWish({ name: 'Hornero', barrio: 'Caballito', why: '' });
-    w1.savedAt = today(95);
-    addWish({ name: 'Origen Sur', barrio: 'Boedo', why: 'Medialunas de masa madre.', address: 'Av. Boedo 900', lat: -34.62376, lng: -58.4161 });
-    addWish({ name: 'Ventana Café', barrio: 'Belgrano', why: 'Me la recomendó Sofi, V60 de Etiopía.', address: 'Av. Cabildo 2100', lat: -34.56221, lng: -58.45679 });
-    var b = batch; batch = null;
-    run(insertSteps(b));
-  }
-
   // ---------- cuenta ----------
   var authListeners = [];
   var readyResolve;
@@ -449,7 +395,7 @@
     cafe: cafe, visit: visit, visitsOf: visitsOf, stats: stats, ranking: ranking, rankOf: rankOf, findCafeByName: findCafeByName,
     addCafe: addCafe, updateCafe: updateCafe, addVisit: addVisit, updateVisit: updateVisit, deleteVisit: deleteVisit, deleteCafe: deleteCafe,
     wish: wish, addWish: addWish, deleteWish: deleteWish,
-    prefs: prefs, setPref: setPref, exportJSON: exportJSON, importJSON: importJSON, reset: reset, seed: seed,
+    prefs: prefs, setPref: setPref, exportJSON: exportJSON, importJSON: importJSON, reset: reset,
     hasLegacy: function () { return !!legacyData(); }, importLegacy: importLegacy,
     loadError: function () { return loadError; },
     reload: function () { loading = loadRemote(); return loading; },
