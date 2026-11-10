@@ -614,6 +614,129 @@
     if (!m.fit(pts, pad)) m.centerOn(Geo.BA.lat, Geo.BA.lng, 12);
   }
 
+  // ---------- Google Maps adentro de la app ----------
+  // El mapa "embed" de Google es gratis y sin clave: muestra el lugar como figura en Maps (pin, nombre, dirección)
+  // sin saltar a la app de Maps. No se puede leer lo que muestra: la ubicación se marca acá o se pega la dirección.
+  function gmapsEmbedUrl(q) {
+    var term = (q + ', Argentina').replace(/!/g, ' ');
+    return 'https://www.google.com/maps/embed?origin=mfe&pb=!1m2!2m1!1s' + encodeURIComponent(term).replace(/%20/g, '+') + '!3m1!1ses!5m1!1ses';
+  }
+  function gmapsPanelHtml(id) {
+    return '<button type="button" class="dag-btn dag-btn--ghost dag-btn--sm app-gmaps-btn" id="' + id + '-btn" aria-expanded="false" aria-controls="' + id + '" hidden>' + ic('map') + '<span class="app-gmaps-btn__txt">Ver en Google Maps</span></button>' +
+      '<div class="app-gmaps" id="' + id + '" hidden><iframe title="Google Maps" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>' +
+      '<p class="app-hint">Así figura en Google Maps. Copiá la dirección de ahí y pegala en Ubicación, o tocá «Marcar en el mapa» y poné el pin en el mismo lugar.</p></div>';
+  }
+  // Conecta el botón y el panel al campo de nombre. Devuelve show(q) para abrirlo desde la sugerencia.
+  function wireGmaps(root, id, input) {
+    var btn = root.querySelector('#' + id + '-btn'), panel = root.querySelector('#' + id), frame = panel.querySelector('iframe');
+    var timer = null, shown = '';
+    function query() { var v = input.value.trim(); return v.length >= 3 && !Geo.isMapsLink(v) ? v : ''; }
+    function load(q) { if (q && q !== shown) { shown = q; frame.src = gmapsEmbedUrl(q); } }
+    function set(open) {
+      panel.hidden = !open;
+      btn.setAttribute('aria-expanded', String(open));
+      btn.querySelector('.app-gmaps-btn__txt').textContent = open ? 'Ocultar Google Maps' : 'Ver en Google Maps';
+      if (open) load(query());
+    }
+    function sync() {
+      var q = query();
+      btn.hidden = !q;
+      if (!q) { set(false); return; }
+      if (!panel.hidden) { clearTimeout(timer); timer = setTimeout(function () { load(query()); }, 700); }
+    }
+    input.addEventListener('input', sync);
+    btn.addEventListener('click', function () { set(panel.hidden); });
+    sync();
+    return {
+      show: function (q) {
+        if (q && !input.value.trim()) input.value = q;
+        sync(); set(true);
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      },
+      destroy: function () { clearTimeout(timer); }
+    };
+  }
+
+  /* Marcar a mano, a pantalla completa: el pin queda fijo en el centro y se mueve el mapa abajo.
+     o: start {lat,lng}, zoom, pin (html), onPick({lat,lng}) */
+  function openMapPicker(o) {
+    var prevFocus = document.activeElement;
+    var ov = document.createElement('div');
+    ov.className = 'app-picker';
+    ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', 'Marcar la ubicación en el mapa');
+    ov.innerHTML = '<div class="app-picker__stage"><div class="dag-map app-picker__map"></div>' +
+      '<div class="app-picker__pin" aria-hidden="true">' + o.pin + '</div>' +
+      '<div class="app-picker__top"><button type="button" class="dag-btn dag-btn--secondary dag-btn--icon app-picker__close" aria-label="Cancelar">' + ic('back') + '</button>' +
+      '<div class="app-pop"><label class="dag-search app-search-input">' + ic('search') +
+      '<input id="pk-q" type="search" placeholder="Ir a una calle o zona" autocomplete="off" aria-label="Ir a una calle o zona"></label>' +
+      '<div id="pk-suggest" class="app-suggest app-suggest--pop" hidden></div></div></div></div>' +
+      '<div class="app-picker__sheet"><p class="dag-label">Ubicación de la cafetería</p>' +
+      '<p class="app-picker__addr" id="pk-addr" aria-live="polite">Mové el mapa hasta que el pin quede en la puerta.</p>' +
+      '<div class="app-sheet-actions"><button type="button" class="dag-btn dag-btn--secondary" id="pk-here">' + ic('route') + 'Estoy acá</button>' +
+      '<button type="button" class="dag-btn" id="pk-ok">' + ic('check') + 'Usar esta</button></div></div>';
+    document.body.appendChild(ov);
+    document.body.classList.add('has-modal');
+    var addrEl = ov.querySelector('#pk-addr'), pinEl = ov.querySelector('.app-picker__pin');
+    var start = o.start || Geo.BA;
+    var m = MapView.mount(ov.querySelector('.app-picker__map'), { center: start, zoom: o.zoom || 16, wheel: true, zoomControl: true });
+    var timer = null, asked = 0;
+
+    function close() {
+      document.removeEventListener('keydown', onKey);
+      clearTimeout(timer);
+      if (m) m.destroy();
+      ov.remove();
+      if (!document.querySelector('.app-overlay')) document.body.classList.remove('has-modal');
+      if (prevFocus && prevFocus.focus) prevFocus.focus({ preventScroll: true });
+    }
+    function onKey(e) { if (e.key === 'Escape' && ov.querySelector('#pk-suggest').hidden) close(); }
+    document.addEventListener('keydown', onKey);
+
+    // la dirección del punto del centro, cuando el mapa se queda quieto
+    function lookup() {
+      if (!m) return;
+      var c = m.center(), mine = ++asked;
+      addrEl.textContent = 'Buscando la dirección…';
+      Geo.reverse(c.lat, c.lng).then(function (pl) {
+        if (mine !== asked) return;
+        var line = pl ? [pl.address || pl.name, pl.barrio].filter(Boolean).join(' · ') : '';
+        addrEl.textContent = line || 'Sin dirección para este punto, pero la ubicación sirve igual.';
+      }).catch(function () { if (mine === asked) addrEl.textContent = 'Sin conexión para la dirección; la ubicación sirve igual.'; });
+    }
+    if (m) {
+      m.map.on('movestart', function () { pinEl.classList.add('is-moving'); clearTimeout(timer); asked++; });
+      m.map.on('moveend', function () { pinEl.classList.remove('is-moving'); clearTimeout(timer); timer = setTimeout(lookup, 350); });
+      requestAnimationFrame(function () { m.invalidate(); m.centerOn(start.lat, start.lng, o.zoom || 16); lookup(); });
+    }
+
+    var q = ov.querySelector('#pk-q');
+    Geo.attach(q, {
+      list: ov.querySelector('#pk-suggest'),
+      near: function () { return m ? m.center() : Geo.BA; },
+      onPick: function (pl) { q.value = ''; q.blur(); if (m) m.centerOn(pl.lat, pl.lng, 18); }
+    });
+    ov.querySelector('.app-picker__close').addEventListener('click', close);
+    ov.querySelector('#pk-here').addEventListener('click', function () {
+      var b = this;
+      if (!navigator.geolocation) { addrEl.textContent = 'Este navegador no comparte la ubicación.'; return; }
+      b.disabled = true; addrEl.textContent = 'Buscando dónde estás…';
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        b.disabled = false;
+        if (m) m.centerOn(pos.coords.latitude, pos.coords.longitude, 18);
+      }, function (err) {
+        b.disabled = false;
+        addrEl.textContent = err && err.code === 1 ? 'No diste permiso de ubicación. Mové el mapa a mano.' : 'No pude saber dónde estás. Mové el mapa a mano.';
+      }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
+    });
+    ov.querySelector('#pk-ok').addEventListener('click', function () {
+      if (!m) { close(); return; }
+      var c = m.center();
+      close();
+      o.onPick({ lat: c.lat, lng: c.lng });
+    });
+    ov.querySelector('#pk-ok').focus({ preventScroll: true });
+  }
+
   /* cfg: mapEl, hintEl, addrInput, addrList, pin (html), point ({lat,lng,barrio,placeId} o null)
      El barrio ya no se escribe: sale solo del lugar elegido (o del punto tocado) y se guarda para las listas. */
   function placeFields(cfg) {
@@ -625,7 +748,7 @@
     function hint() {
       if (!cfg.hintEl) return;
       cfg.hintEl.textContent = !m ? '' : point ? 'Listo. Si el pin no quedó justo, arrastralo o tocá el lugar exacto.'
-        : 'Si no aparece por nombre: en Google Maps tocá la dirección del lugar para copiarla y pegala arriba' + (cfg.hereBtn ? ', o tocá «Estoy acá».' : '.');
+        : 'Si no aparece por nombre: pegá arriba la dirección copiada de Google Maps, o marcala a mano en el mapa.';
     }
     // "Estoy acá": la ubicación del teléfono (para reseñar desde la cafetería)
     function here() {
@@ -647,6 +770,16 @@
       }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
     }
     if (cfg.hereBtn) cfg.hereBtn.addEventListener('click', here);
+    if (cfg.pickBtn) cfg.pickBtn.addEventListener('click', function () {
+      openMapPicker({
+        start: point || (m ? m.center() : Geo.BA), zoom: point ? 18 : 16, pin: cfg.pin,
+        onPick: function (ll) {
+          addrTouched = false; // la dirección sale del punto elegido
+          setPoint(ll);
+          if (m) m.centerOn(ll.lat, ll.lng, 17);
+        }
+      });
+    });
     function sync(center) {
       if (m) m.setPin(point ? point.lat : null, point ? point.lng : null, cfg.pin, function (ll) { setPoint(ll, true); });
       if (m && center && point) m.centerOn(point.lat, point.lng, Math.max(16, m.map.getZoom()));
@@ -721,8 +854,9 @@
       '<input id="rv-address" placeholder="Dirección o lugar" autocomplete="off" aria-label="Ubicación" value="' + esc(st.address || '') + '"></label>' +
       '<div id="rv-addr-suggest" class="app-suggest app-suggest--pop" hidden></div></div>' +
       '<div class="dag-map app-pickmap" id="rv-map" aria-label="Mapa: tocá para marcar el lugar"></div>' +
-      '<div class="app-loc-foot"><p class="app-hint" id="rv-map-hint"></p>' +
-      '<button type="button" class="dag-btn dag-btn--secondary dag-btn--sm" id="rv-here">' + ic('route') + 'Estoy acá</button></div></div>' +
+      '<div class="app-loc-actions"><button type="button" class="dag-btn dag-btn--secondary dag-btn--sm" id="rv-pick">' + ic('map') + 'Marcar en el mapa</button>' +
+      '<button type="button" class="dag-btn dag-btn--secondary dag-btn--sm" id="rv-here">' + ic('route') + 'Estoy acá</button></div>' +
+      '<p class="app-hint" id="rv-map-hint"></p></div>' +
       // 3. fecha
       '<div class="dag-section"><label class="dag-field"><span class="dag-label">Fecha</span><input class="dag-input" type="date" id="rv-date" value="' + esc(v.date || S.today()) + '" max="' + S.today() + '"></label></div>' +
       // 4. puntuación
@@ -759,7 +893,7 @@
 
     // --- ubicación (va primero: el nombre la usa) ---
     var loc = placeFields({
-      mapEl: form.querySelector('#rv-map'), hintEl: form.querySelector('#rv-map-hint'), hereBtn: form.querySelector('#rv-here'),
+      mapEl: form.querySelector('#rv-map'), hintEl: form.querySelector('#rv-map-hint'), hereBtn: form.querySelector('#rv-here'), pickBtn: form.querySelector('#rv-pick'),
       addrInput: form.querySelector('#rv-address'), addrList: form.querySelector('#rv-addr-suggest'),
       pin: pinCup(), point: hasLL(st) ? st : null
     });
@@ -784,13 +918,16 @@
         box.innerHTML = '<div class="app-pop"><label class="dag-field"><span class="app-field-label">Nombre</span>' +
           '<span class="dag-search app-search-input">' + ic('search') + '<input id="rv-name" placeholder="Buscala por nombre o pegá un link de Maps" autocomplete="off" value="' + esc(st.name) + '"></span></label>' +
           '<div id="rv-suggest" class="app-suggest app-suggest--pop" hidden></div></div>' +
-          '<p class="app-error" id="rv-name-err" hidden>Poné el nombre de la cafetería.</p>';
+          '<p class="app-error" id="rv-name-err" hidden>Poné el nombre de la cafetería.</p>' + gmapsPanelHtml('rv-gmaps');
         var name = box.querySelector('#rv-name');
+        var gm = wireGmaps(box, 'rv-gmaps', name);
+        cleanup.push(gm.destroy);
         name.addEventListener('input', function () { st.name = name.value; });
         Geo.attach(name, {
           list: box.querySelector('#rv-suggest'),
           near: loc.near,
           pasteWhere: 'en Ubicación',
+          onGmaps: function (q) { gm.show(q); },
           local: function (q) {
             q = q.toLowerCase();
             var hits = q ? S.cafes().filter(function (c) { return c.name.toLowerCase().indexOf(q) >= 0; }).slice(0, 3) : [];
@@ -1092,22 +1229,26 @@
     openSheet('<h2 class="dag-title app-sheet-title">Guardala para después</h2><form id="wf" class="dag-stack" novalidate>' +
       '<div class="app-pop"><label class="dag-field"><span class="app-field-label">Nombre</span><input class="dag-input" id="wf-name" placeholder="Buscala por nombre" autocomplete="off"></label>' +
       '<div id="wf-suggest" class="app-suggest app-suggest--pop" hidden></div></div>' +
-      '<p class="app-error" id="wf-err" hidden>Poné el nombre.</p>' +
+      '<p class="app-error" id="wf-err" hidden>Poné el nombre.</p>' + gmapsPanelHtml('wf-gmaps').replace('pegala en Ubicación', 'pegala en Dirección') +
       '<label class="dag-field"><span class="app-field-label">¿Por qué?</span><input class="dag-input" id="wf-why" placeholder="Quién te la recomendó, qué tienen…"></label>' +
       '<div class="app-pop"><label class="dag-search app-search-input">' + ic('search') + '<input id="wf-address" placeholder="Dirección (opcional)" autocomplete="off"></label>' +
       '<div id="wf-addr-suggest" class="app-suggest app-suggest--pop" hidden></div></div>' +
-      '<div class="dag-map app-pickmap app-pickmap--sm" id="wf-map" aria-label="Mapa: tocá para marcar el lugar"></div><p class="app-hint" id="wf-hint"></p>' +
+      '<div class="dag-map app-pickmap app-pickmap--sm" id="wf-map" aria-label="Mapa: tocá para marcar el lugar"></div>' +
+      '<div class="app-loc-actions app-loc-actions--one"><button type="button" class="dag-btn dag-btn--secondary dag-btn--sm" id="wf-pick">' + ic('map') + 'Marcar en el mapa</button></div>' +
+      '<p class="app-hint" id="wf-hint"></p>' +
       '<button type="submit" class="dag-btn dag-btn--block">' + ic('wishlist') + 'Guardar en la wishlist</button></form>',
       function (sheet, done) {
         var loc = placeFields({
-          mapEl: sheet.querySelector('#wf-map'), hintEl: sheet.querySelector('#wf-hint'),
+          mapEl: sheet.querySelector('#wf-map'), hintEl: sheet.querySelector('#wf-hint'), pickBtn: sheet.querySelector('#wf-pick'),
           addrInput: sheet.querySelector('#wf-address'), addrList: sheet.querySelector('#wf-addr-suggest'),
           pin: pinWish(), point: null
         });
         setTimeout(function () { loc.invalidate(); }, 220); // el sheet sube animado
         var name = sheet.querySelector('#wf-name');
+        var wgm = wireGmaps(sheet, 'wf-gmaps', name);
         Geo.attach(name, {
           list: sheet.querySelector('#wf-suggest'), near: loc.near, pasteWhere: 'en Dirección',
+          onGmaps: function (q) { wgm.show(q); },
           onPick: function (pl) { if (pl.name) name.value = pl.name; loc.applyPlace(pl); sheet.querySelector('#wf-err').hidden = true; }
         });
         sheet.querySelector('#wf').addEventListener('submit', function (e) {

@@ -306,7 +306,43 @@ button.app-rowbtn { appearance: none; border: 0; width: 100%; font: inherit; col
 .app-suggest__gmaps { text-decoration: none; }
 .app-suggest__gmaps .app-suggest__txt span { white-space: normal; }
 
-/* ubicación: pista + "Estoy acá" debajo del mapa */
-.app-loc-foot { display: flex; align-items: flex-start; gap: var(--space-3); margin-top: var(--space-2); }
-.app-loc-foot .app-hint { flex: 1; min-width: 0; }
-.app-loc-foot .dag-btn { flex: none; }
+/* ubicación: acciones debajo del mapa */
+.app-loc-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); margin: var(--space-2) 0; }
+.app-loc-actions--one { grid-template-columns: 1fr; }
+
+/* marcar a mano: mapa a pantalla completa con el pin fijo en el centro */
+.app-picker {
+  position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column;
+  max-width: 430px; margin: 0 auto; background: var(--surface);
+}
+.app-picker__stage { position: relative; flex: 1; min-height: 0; }
+.app-picker__map { position: absolute; inset: 0; border-radius: 0; }
+.app-picker__pin { position: absolute; left: 50%; top: 50%; z-index: 500; pointer-events: none; }
+.app-picker__pin .dag-pin { transition: transform .15s ease; }
+.app-picker__pin.is-moving .dag-pin { transform: translate(-50%, calc(-100% - 8px)); }
+.app-picker__pin::after { /* sombra del punto exacto */
+  content: ""; position: absolute; left: -3px; top: -2px; width: 6px; height: 4px; border-radius: 50%; background: rgba(0, 0, 0, .35);
+}
+.app-picker__top {
+  position: absolute; z-index: 600; top: calc(var(--space-3) + env(safe-area-inset-top)); left: var(--space-4); right: var(--space-4);
+  display: flex; gap: var(--space-2); align-items: flex-start;
+}
+.app-picker__top .app-pop { flex: 1; min-width: 0; }
+.app-picker__top .dag-search, .app-picker__close { box-shadow: var(--shadow-float); }
+.app-picker__close { background: var(--surface-raised); flex: none; }
+.app-picker__sheet {
+  flex: none; padding: var(--space-4) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom));
+  background: var(--surface-raised); border-radius: var(--radius-lg, 20px) var(--radius-lg, 20px) 0 0;
+  box-shadow: 0 -8px 24px rgba(36, 23, 15, .12); margin-top: -16px; position: relative; z-index: 700;
+}
+.app-picker__addr { margin: 4px 0 var(--space-3); font-size: 16px; line-height: 22px; font-weight: 600; min-height: 44px; }
+
+/* Google Maps adentro de la app (embed) */
+.app-gmaps-btn { margin-top: var(--space-2); }
+.app-gmaps-btn[hidden], .app-gmaps[hidden] { display: none; }
+.app-gmaps { margin-top: var(--space-2); }
+.app-gmaps iframe {
+  display: block; width: 100%; height: 300px; border: 0; border-radius: var(--radius-md);
+  background: var(--surface-sunk); box-shadow: inset 0 0 0 1px var(--line);
+}
+.app-gmaps .app-hint { margin-top: var(--space-2); }

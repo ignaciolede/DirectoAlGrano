@@ -143,8 +143,11 @@
       var q = input.value.trim();
       var local = opts.local ? opts.local(q) : '';
       var remote = '';
-      var gmaps = '<a class="app-suggest__item app-suggest__gmaps" href="' + esc(mapsSearchUrl(q, opts.near ? opts.near() : null)) + '" target="_blank" rel="noopener">' + icon('route') +
-        '<span class="app-suggest__txt"><b>Abrir en Google Maps</b><span class="dag-muted">Tocá la dirección del lugar para copiarla y pegala ' + where + '.</span></span></a>';
+      var gmaps = opts.onGmaps
+        ? '<button type="button" class="app-suggest__item app-suggest__gmaps" data-gmaps>' + icon('map') +
+          '<span class="app-suggest__txt"><b>Ver en Google Maps</b><span class="dag-muted">Sin salir de la app: mirá cómo figura y dónde queda.</span></span></button>'
+        : '<a class="app-suggest__item app-suggest__gmaps" href="' + esc(mapsSearchUrl(q, opts.near ? opts.near() : null)) + '" target="_blank" rel="noopener">' + icon('route') +
+          '<span class="app-suggest__txt"><b>Abrir en Google Maps</b><span class="dag-muted">Tocá la dirección del lugar para copiarla y pegala ' + where + '.</span></span></a>';
       if (state === 'link') remote = linkMsg;
       else if (state === 'picking') remote = '<p class="app-suggest__state">Ubicándola…</p>';
       else if (state === 'loading') remote = '<p class="app-suggest__state">Buscando en el mapa…</p>';
@@ -205,6 +208,7 @@
         }).catch(function () { /* sin dirección, igual sirve */ }).then(done);
         return;
       }
+      if (e.target.closest('[data-gmaps]') && opts.onGmaps) { var gq = input.value.trim(); close(); opts.onGmaps(gq); return; }
       var l = e.target.closest('[data-local]');
       if (l && opts.onLocal) { close(); opts.onLocal(l); }
     });
@@ -213,5 +217,5 @@
     return { close: close };
   }
 
-  window.Geo = { BA: BA, search: search, parseMapsLink: parseMapsLink, mapsSearchUrl: mapsSearchUrl, reverse: reverse, attach: attach, km: km, fmtKm: fmtKm, sub: sub };
+  window.Geo = { BA: BA, search: search, isMapsLink: isMapsLink, parseMapsLink: parseMapsLink, mapsSearchUrl: mapsSearchUrl, reverse: reverse, attach: attach, km: km, fmtKm: fmtKm, sub: sub };
 })();
