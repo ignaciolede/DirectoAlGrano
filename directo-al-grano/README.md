@@ -7,6 +7,7 @@ HTML, CSS y JS sin build. Dependencias por CDN con hash SRI: Leaflet para el map
 
 1. Creá un proyecto en [supabase.com](https://supabase.com).
 2. En **SQL Editor**, pegá y corré `supabase/schema.sql`. Crea las tablas `cafes`, `visits` y `wishlist` con Row Level Security: cada usuario ve y toca solo lo suyo.
+   Después corré `supabase/comunidad.sql`: activa Personas y el ranking Global (perfil con @usuario único y funciones que comparten solo nombre de cafetería, ubicación y notas; nunca mails ni textos de reviews).
 3. En **Project Settings → API**, copiá la *Project URL* y la *anon public key* a `js/config.js`. La anon key es pública por diseño; nunca pongas la `service_role`.
 4. En **Authentication → URL Configuration**, poné como *Site URL* la dirección donde abrís la app (por ejemplo `http://localhost:3000/directo-al-grano/`) y agregala también en *Redirect URLs*. Ahí vuelven los links de confirmación y de nueva contraseña.
 5. Opcional: en **Authentication → Providers → Email** podés apagar *Confirm email* para entrar sin confirmar el mail (cómodo para probar). Con eso prendido, el mail de Supabase tiene un límite bajo de envíos por hora; para usuarios reales configurá un SMTP propio.
@@ -55,6 +56,7 @@ En Supabase, **Authentication → URL Configuration** tiene que tener como *Site
 - `js/config.js`: URL y anon key de Supabase.
 - `js/store.js`: sesión (Supabase Auth), datos, promedios, y ranking. Al entrar trae todo a memoria; cada cambio se aplica al instante y se sube a Supabase en una cola ordenada.
 - `supabase/schema.sql`: tablas y políticas RLS.
+- `supabase/comunidad.sql`: perfiles con @usuario único (`username_available` para el registro), `place_id` en cafeterías y las funciones `search_users`, `user_ranking` y `global_ranking`.
 - `js/geo.js`: búsqueda de lugares y búsqueda inversa con [Photon](https://photon.komoot.io), el buscador de OpenStreetMap: no pide clave y prioriza lo cercano y las cafeterías.
 - `js/map.js`: Leaflet con tiles de OpenStreetMap, filtro de color por tema y pines `dag-pin`.
 - `js/app.js`: router por hash (`#/entrar`, `#/registro`, `#/recuperar`, `#/ranking`, `#/cafe/:id`, `#/nueva`, `#/editar/:visita`, `#/mapa`, `#/wishlist`, `#/diario`) y pantallas.

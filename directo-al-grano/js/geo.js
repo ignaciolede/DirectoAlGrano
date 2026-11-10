@@ -3,6 +3,8 @@
 (function () {
   var API = 'https://photon.komoot.io';
   var BA = { lat: -34.6037, lng: -58.4180 }; // centro por defecto: Buenos Aires
+  // Argentina entera (minLon,minLat,maxLon,maxLat): los resultados de afuera no se piden.
+  var AR_BBOX = '-73.6,-55.2,-53.5,-21.7';
   var FOOD = { cafe: 3, coffee_shop: 3, coffee: 3, bakery: 2, restaurant: 1, fast_food: 1, ice_cream: 1, pastry: 2, deli: 1 };
 
   function km(a, b) {
@@ -26,6 +28,9 @@
       country: p.country || '',
       lat: c[1], lng: c[0],
       kind: p.osm_value || '',
+      countrycode: (p.countrycode || '').toUpperCase(),
+      // id estable del lugar en OpenStreetMap: junta las reviews de todos sobre la misma cafetería
+      placeId: !isAddress && p.osm_type && p.osm_id ? p.osm_type + p.osm_id : '',
       food: FOOD[p.osm_value] || 0
     };
   }
@@ -35,27 +40,44 @@
   }
 
   var ctrl = null;
-  // near: {lat, lng}. Devuelve lugares ordenados: cercanos primero y, entre ellos, cafeterías primero.
+  function query(q, near, extra, signal) {
+    var url = API + '/api/?q=' + encodeURIComponent(q) + '&limit=10&bbox=' + AR_BBOX +
+      '&lat=' + near.lat.toFixed(4) + '&lon=' + near.lng.toFixed(4) + '&zoom=13&location_bias_scale=0.3' + (extra || '');
+    return fetch(url, signal ? { signal: signal } : {}).then(function (r) {
+      if (!r.ok) throw new Error('http ' + r.status);
+      return r.json();
+    }).then(function (d) { return d.features || []; });
+  }
+  // near: {lat, lng}. Solo Argentina. Dos consultas a la vez: una solo de cafeterías (para que el nombre
+  // de un café le gane a una calle que se llama parecido) y una general (direcciones y lo demás).
   function search(q, near) {
     if (ctrl) ctrl.abort();
     ctrl = window.AbortController ? new AbortController() : null;
+    var signal = ctrl ? ctrl.signal : null;
     near = near || BA;
-    var url = API + '/api/?q=' + encodeURIComponent(q) + '&limit=12&zoom=12&location_bias_scale=0.1&lat=' + near.lat.toFixed(4) + '&lon=' + near.lng.toFixed(4);
-    return fetch(url, ctrl ? { signal: ctrl.signal } : {}).then(function (r) {
-      if (!r.ok) throw new Error('http ' + r.status);
-      return r.json();
-    }).then(function (d) {
+    // si falla una de las dos, alcanza con la otra; si fallan las dos, error
+    var failed = 0, lastErr = null;
+    function soft(p) {
+      return p.catch(function (err) {
+        if (err && err.name === 'AbortError') throw err;
+        failed++; lastErr = err; return [];
+      });
+    }
+    var cafes = soft(query(q, near, '&osm_tag=amenity:cafe&osm_tag=shop:coffee', signal));
+    return Promise.all([cafes, soft(query(q, near, '', signal))]).then(function (r) {
+      if (failed === 2) throw lastErr;
       var seen = {};
-      return (d.features || []).map(toPlace).filter(function (pl) {
-        var k = (pl.name + '|' + pl.address + '|' + pl.lat.toFixed(4)).toLowerCase();
+      return r[0].concat(r[1]).map(toPlace).filter(function (pl) {
+        if (pl.countrycode && pl.countrycode !== 'AR') return false;
+        var k = pl.placeId || (pl.name + '|' + pl.address + '|' + pl.lat.toFixed(4)).toLowerCase();
         if (seen[k] || (!pl.name && !pl.address)) return false;
         seen[k] = 1; return true;
       }).map(function (pl, i) {
         pl.km = km(near, pl);
-        // los primeros puestos de Photon valen, pero lo cercano y las cafeterías pesan más
-        pl.rank = i + (pl.km > 60 ? 40 : pl.km > 15 ? 8 : 0) - pl.food * 1.5;
+        // el orden de Photon vale, pero las cafeterías y lo cercano pesan más
+        pl.rank = i + (pl.km > 300 ? 12 : pl.km > 40 ? 5 : 0) - pl.food * 3;
         return pl;
-      }).sort(function (a, b) { return a.rank - b.rank; }).slice(0, 6);
+      }).sort(function (a, b) { return a.rank - b.rank; }).slice(0, 7);
     });
   }
 
@@ -67,7 +89,7 @@
       var f = (d.features || [])[0];
       if (!f) return null;
       var pl = toPlace(f);
-      pl.lat = lat; pl.lng = lng;
+      pl.lat = lat; pl.lng = lng; pl.placeId = ''; // un toque en el mapa no identifica la cafetería
       return pl;
     });
   }

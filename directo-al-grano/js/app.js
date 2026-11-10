@@ -36,9 +36,16 @@
   function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
   var ASPECT_FILTERS = S.ASPECTS.map(function (a) { return { key: a.key, name: a.name }; }).concat([{ key: 'comida', name: 'Comida' }]);
-  var HERO_LABEL = { general: 'Tu número 1', cafe: 'Mejor café', lugar: 'Mejor lugar', atencion: 'Mejor atención', precio: 'Mejor precio/calidad', trabajo: 'Mejor para trabajar', comida: 'Mejor comida' };
+  var HERO_LABEL = { general: 'Tu número 1', cafe: 'Mejor café', lugar: 'Mejor lugar', atencion: 'Mejor atención', precio: 'Mejor precio/calidad', comida: 'Mejor comida' };
 
-  var ui = { rankKey: 'general', rankQuery: '', searchOpen: false, mapFilter: 'todas', mapSel: null, mapPlace: null, pendingPlace: null };
+  // Ranking tiene tres vistas: el tuyo, el de toda la app y el de otra persona.
+  function rankSeg(cur) {
+    return '<nav class="app-seg" aria-label="Rankings">' + [['ranking', 'Mío'], ['global', 'Global'], ['personas', 'Personas']].map(function (t) {
+      return '<a class="app-seg__opt" href="#/' + t[0] + '"' + (t[0] === cur ? ' aria-current="page"' : '') + '>' + t[1] + '</a>';
+    }).join('') + '</nav>';
+  }
+
+  var ui = { rankKey: 'general', rankQuery: '', peopleQuery: '', searchOpen: false, mapFilter: 'todas', mapSel: null, mapPlace: null, pendingPlace: null };
   var cleanup = [];
   var navigatedInApp = false;
 
@@ -128,13 +135,14 @@
   function setHash(h) { history.replaceState(null, '', h); }
   function render() {
     cleanup.forEach(function (fn) { fn(); }); cleanup = [];
+    screenId++;
     if (!booted) return;
     var r = route();
     // Sin sesión, solo las pantallas de cuenta; con sesión, nunca.
     if (!S.auth.user() && !AUTH_VIEWS[r.name]) { setHash('#/entrar'); r = route(); }
     else if (S.auth.user() && AUTH_VIEWS[r.name]) { setHash('#/ranking'); r = route(); }
     var fn = S.auth.user() && S.loadError() ? VIEWS.error : VIEWS[r.name] || VIEWS.ranking;
-    var tab = { ranking: 'ranking', cafe: 'ranking', mapa: 'mapa', wishlist: 'wishlist', diario: 'diario' }[r.name] || '';
+    var tab = { ranking: 'ranking', cafe: 'ranking', global: 'ranking', personas: 'ranking', persona: 'ranking', mapa: 'mapa', wishlist: 'wishlist', diario: 'diario' }[r.name] || '';
     tabbar.querySelectorAll('.dag-tab').forEach(function (t) {
       if (t.getAttribute('data-tab') === tab) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
     });
@@ -161,7 +169,7 @@
       '<button type="button" class="dag-btn dag-btn--ghost dag-btn--icon" id="rk-more" aria-label="Ajustes">' + ic('more') + '</button></span></div>';
 
     if (!cafes.length) {
-      view.innerHTML = head + '<h1 class="dag-display">Ranking</h1>' +
+      view.innerHTML = head + '<h1 class="dag-display">Ranking</h1>' + rankSeg('ranking') +
         '<div class="app-empty"><span class="app-empty__mark">' + DAG.mark() + '</span>' +
         '<p>Todavía no reseñaste nada. El primer cortado corre por tu cuenta.</p>' +
         '<a class="dag-btn" href="#/nueva">' + ic('plus') + 'Nueva review</a>' +
@@ -176,7 +184,7 @@
       return;
     }
 
-    view.innerHTML = head + '<h1 class="dag-display" style="margin-bottom:12px">Ranking</h1>' +
+    view.innerHTML = head + '<h1 class="dag-display" style="margin-bottom:12px">Ranking</h1>' + rankSeg('ranking') +
       '<div class="app-searchrow" ' + (ui.searchOpen ? '' : 'hidden') + '><label class="dag-search">' + ic('search') +
       '<input id="rk-q" type="search" placeholder="Buscá por nombre o barrio" value="' + esc(ui.rankQuery) + '" autocomplete="off"></label></div>' +
       '<div class="dag-chips dag-chips--scroll app-filters" data-single role="group" aria-label="Ordenar por">' +
@@ -245,6 +253,268 @@
     box.innerHTML = html;
   }
 
+  // ---------- @usuario: campo con chequeo en vivo ----------
+  function handleField(id, value, label) {
+    return '<div class="dag-field"><label class="app-field-label" for="' + id + '">' + label + '</label>' +
+      '<span class="app-handle"><span class="app-handle__at" aria-hidden="true">@</span><input class="dag-input" id="' + id + '" value="' + esc(value || '') + '"' +
+      ' maxlength="21" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" aria-describedby="' + id + '-hint"></span>' +
+      '<span class="dag-field__hint"><span id="' + id + '-hint" aria-live="polite">Único. Minúsculas, números, punto y guion bajo.</span></span></div>';
+  }
+  // Normaliza mientras escribís (sin @, minúsculas, espacios a _) y avisa si está libre.
+  // Devuelve check(): Promise con el problema ('' si está bien). current = tu @ actual.
+  function wireHandle(input, current) {
+    var hint = document.getElementById(input.id + '-hint'), base = hint.textContent, timer = null, seq = 0;
+    function say(msg, kind) { hint.textContent = msg || base; hint.setAttribute('data-state', kind || ''); }
+    function check() {
+      var u = S.USERNAME.clean(input.value), bad = S.USERNAME.problem(u);
+      if (bad) return Promise.resolve(bad);
+      if (u === current) return Promise.resolve('');
+      // null = no se pudo saber: se deja seguir, la base igual rechaza un @ repetido
+      return S.community.usernameAvailable(u).then(function (ok) { return ok === false ? '@' + u + ' ya está tomado.' : ''; });
+    }
+    input.addEventListener('input', function () {
+      var c = input.value.replace(/^@+/, '').toLowerCase().replace(/\s/g, '_');
+      if (c !== input.value) {
+        var pos = Math.max(0, (input.selectionStart || 0) - (input.value.length - c.length));
+        input.value = c; try { input.setSelectionRange(pos, pos); } catch (e) { /* nada */ }
+      }
+      clearTimeout(timer); seq++;
+      if (!c || c.length < 3) { say(); return; }
+      var bad = S.USERNAME.problem(c);
+      if (bad) { say(bad, 'bad'); return; }
+      if (c === current) { say('Es el tuyo.', 'ok'); return; }
+      say('Fijándome si está libre…');
+      var mine = seq;
+      timer = setTimeout(function () {
+        S.community.usernameAvailable(c).then(function (ok) {
+          if (mine !== seq) return;
+          if (ok === true) say('@' + c + ' está libre.', 'ok');
+          else if (ok === false) say('@' + c + ' ya está tomado.', 'bad');
+          else say();
+        });
+      }, 350);
+    });
+    return check;
+  }
+  function usernameError(err) {
+    if (err.taken) return 'Ese @ ya está tomado. Probá otro.';
+    if (err.invalid) return 'Ese @ no sirve: minúsculas, números, punto y guion bajo.';
+    if (err.missing) return 'Falta activar la comunidad en Supabase (supabase/comunidad.sql).';
+    return 'No pude guardarlo. Probá de nuevo.';
+  }
+
+  // Cuentas sin @ (las de antes, o si justo se lo ganaron al registrarse): se pide al entrar.
+  function openUsernameSheet() {
+    var u = S.auth.user(); if (!u) return;
+    var sug = S.USERNAME.suggest((u.user_metadata || {}).username || (u.user_metadata || {}).name || '');
+    openSheet('<h2 class="dag-title app-sheet-title">Elegí tu nombre de usuario</h2>' +
+      '<p class="dag-muted app-sheet-text">Es único y con él te encuentran en Personas. Después lo podés cambiar en Ajustes.</p>' +
+      '<form class="dag-stack" novalidate>' + handleField('us-user', sug, 'Nombre de usuario') +
+      '<p class="app-error" role="alert" hidden></p><button type="submit" class="dag-btn dag-btn--block">Listo</button></form>',
+      function (sheet, close) {
+        var form = sheet.querySelector('form'), input = form.querySelector('#us-user'), check = wireHandle(input, '');
+        if (sug) input.dispatchEvent(new Event('input'));
+        wireAuthForm(form, 'Guardando…', function (fail) {
+          check().then(function (bad) {
+            if (bad) return fail(bad, input);
+            S.community.setUsername(input.value).then(function (res) {
+              if (res.error) return fail(usernameError(res.error), input);
+              close(); render(); toast('Listo: sos @' + S.auth.username() + '.');
+            });
+          });
+        });
+      });
+  }
+  function maybeAskUsername() {
+    if (S.community.needsUsername() && !document.querySelector('.app-overlay')) openUsernameSheet();
+  }
+
+  // ================= COMUNIDAD: ranking global, personas, perfil =================
+  function logoHead() {
+    return '<div class="dag-screen__head app-head">' +
+      '<span class="dag-logo"><span class="dag-logo__mark" style="width:30px;height:30px">' + DAG.mark() + '</span>' +
+      '<span class="dag-logo__word" style="font-size:20px">Directo <em>al</em> grano</span></span>' +
+      '<button type="button" class="dag-btn dag-btn--ghost dag-btn--icon" data-settings aria-label="Ajustes">' + ic('more') + '</button></div>';
+  }
+  function bindSettings() {
+    view.querySelectorAll('[data-settings]').forEach(function (b) { b.addEventListener('click', openSettings); });
+  }
+  function loadingLine(txt) { return '<p class="app-empty-line app-loading">' + txt + '</p>'; }
+  function commError(box, err, retry) {
+    box.innerHTML = '<div class="app-empty"><span class="app-empty__mark app-empty__mark--muted">' + DAG.mark() + '</span><p>' +
+      (err && err.missing ? 'La comunidad todavía no está activada: falta correr <code>supabase/comunidad.sql</code> en Supabase.' : 'No pude traer el ranking. Revisá la conexión.') + '</p>' +
+      (err && err.missing ? '' : '<button type="button" class="dag-btn dag-btn--secondary" data-retry>Reintentar</button>') + '</div>';
+    var b = box.querySelector('[data-retry]');
+    if (b) b.addEventListener('click', retry);
+  }
+  // fila de ranking de otra fuente (global o de otra persona). o: pos, name, meta (html), score, href | i, heroLabel
+  function rankRow(o) {
+    var open = o.href ? '<a href="' + o.href + '"' : '<button type="button" data-i="' + o.i + '"';
+    var close = o.href ? '</a>' : '</button>';
+    if (o.heroLabel) {
+      return open + ' class="dag-hero app-rowbtn"><span class="dag-hero__bean">' + DAG.mark() + '</span>' +
+        '<span class="dag-hero__crown">' + ic('crown') + o.heroLabel + '</span>' +
+        '<span><p class="dag-hero__name">' + esc(o.name) + '</p><p class="dag-hero__meta">' + o.meta + '</p>' +
+        '<p class="app-hero__band">' + DAG.bandWord(r1(o.score)) + '</p></span>' +
+        '<span class="dag-hero__score" aria-label="Nota ' + num(o.score) + '">' + num(o.score) + '</span>' + close;
+    }
+    return open + ' class="dag-cafe app-rowbtn"><span class="dag-cafe__rank">' + o.pos + '</span>' +
+      '<span class="dag-cafe__thumb">' + ic('cup') + '</span>' +
+      '<span class="dag-cafe__info"><p class="dag-cafe__name">' + esc(o.name) + '</p><p class="dag-cafe__meta">' + o.meta + '</p></span>' +
+      scoreCol(o.score) + close;
+  }
+  function placeFromRow(r) {
+    return {
+      name: r.name, barrio: r.barrio || '', address: r.address || '',
+      lat: typeof r.lat === 'number' ? r.lat : null, lng: typeof r.lng === 'number' ? r.lng : null,
+      placeId: /^[NWR]\d+$/.test(r.place_key || '') ? r.place_key : ''
+    };
+  }
+  function findMine(pl) {
+    var n = pl.name.trim().toLowerCase();
+    return S.cafes().find(function (c) { return pl.placeId && c.placeId === pl.placeId; }) ||
+      S.cafes().find(function (c) { return c.name.trim().toLowerCase() === n && (!hasLL(c) || !hasLL(pl) || Geo.km(c, pl) < 0.3); }) || null;
+  }
+
+  // Una cafetería de otro: reseñarla, guardarla, verla en el mapa o ir.
+  function openPlaceSheet(pl, metaHtml, score) {
+    var mine = findMine(pl);
+    var wished = S.wishlist().some(function (w) { return w.name.trim().toLowerCase() === pl.name.trim().toLowerCase(); });
+    var where = joinMeta([pl.address, pl.barrio]);
+    openSheet('<div class="app-mapsheet__row">' + badge(score, 'dag-score--lg') +
+      '<div class="app-mapsheet__info"><h2 class="dag-title">' + esc(pl.name) + '</h2><p class="dag-cafe__meta">' + metaHtml + '</p></div></div>' +
+      (where ? '<p class="app-place-line">' + ic('map') + '<span>' + where + '</span></p>' : '') +
+      '<div class="app-sheet-actions" style="margin-top:16px">' +
+      (mine ? '<a class="dag-btn dag-btn--sm" href="#/cafe/' + mine.id + '">' + ic('cup') + 'Tu review</a>'
+        : '<button type="button" class="dag-btn dag-btn--sm" data-review>' + ic('plus') + 'Reseñarla</button>') +
+      (mine || wished ? '' : '<button type="button" class="dag-btn dag-btn--sm dag-btn--secondary" data-wish>' + ic('wishlist') + 'A la wishlist</button>') +
+      (hasLL(pl) ? '<button type="button" class="dag-btn dag-btn--sm dag-btn--secondary" data-map>' + ic('map') + 'Ver en el mapa</button>' : '') +
+      (hasLL(pl) || pl.address ? '<a class="dag-btn dag-btn--sm dag-btn--secondary" href="' + routeUrl(pl) + '" target="_blank" rel="noopener">' + ic('route') + 'Cómo llegar</a>' : '') +
+      '</div>',
+      function (sheet, close) {
+        sheet.addEventListener('click', function (e) {
+          if (e.target.closest('a[href^="#/"]')) { navigatedInApp = true; close(); return; }
+          if (e.target.closest('[data-review]')) { close(); ui.pendingPlace = pl; go('#/nueva?lugar=1'); return; }
+          if (e.target.closest('[data-map]')) {
+            close(); ui.mapPlace = { name: pl.name, address: pl.address, barrio: pl.barrio, lat: pl.lat, lng: pl.lng, placeId: pl.placeId };
+            ui.mapSel = 'place'; ui.mapFilter = 'todas'; go('#/mapa'); return;
+          }
+          var w = e.target.closest('[data-wish]');
+          if (w) {
+            S.addWish({ name: pl.name, barrio: pl.barrio, address: pl.address, lat: pl.lat, lng: pl.lng });
+            w.remove(); toast('A la wishlist. Ahora no te la olvidás.');
+          }
+        });
+      });
+  }
+
+  var screenId = 0; // sube en cada render: las respuestas que llegan tarde a otra pantalla se descartan
+  var cache = { global: null };
+
+  VIEWS.global = function () {
+    view.innerHTML = logoHead() + '<h1 class="dag-display" style="margin-bottom:12px">Ranking</h1>' + rankSeg('global') +
+      '<p class="dag-muted app-sub app-sub--top">Las cafeterías de toda la app. La nota es el promedio entre personas: cada una cuenta una vez, vaya una vez o veinte.</p>' +
+      '<div id="gl-list"></div>';
+    bindSettings();
+    var box = view.querySelector('#gl-list'), my = screenId;
+    function paint(rows) {
+      if (!rows.length) { box.innerHTML = '<p class="app-empty-line">Todavía nadie reseñó nada. Arrancá vos.</p>'; return; }
+      box.innerHTML = '<div class="dag-stack">' + rows.map(function (r, i) {
+        var meta = joinMeta([r.barrio, plural(r.people, 'persona', 'personas'), r.my_score != null ? 'Tu nota ' + num(Number(r.my_score)) : '']);
+        return rankRow({ pos: i + 1, name: r.name, meta: meta, score: Number(r.score), i: i, heroLabel: i === 0 ? 'La número 1 de la app' : '' });
+      }).join('') + '</div>';
+      box.querySelectorAll('[data-i]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var r = rows[+b.getAttribute('data-i')];
+          openPlaceSheet(placeFromRow(r), joinMeta(['#' + (rows.indexOf(r) + 1) + ' de la app', plural(r.people, 'persona', 'personas'), plural(r.visits, 'visita', 'visitas')]), Number(r.score));
+        });
+      });
+    }
+    function load() {
+      S.community.globalRanking().then(function (res) {
+        if (my !== screenId) return;
+        if (res.error) { if (!cache.global) commError(box, res.error, function () { box.innerHTML = loadingLine('Juntando las notas de todos…'); load(); }); return; }
+        cache.global = res.data; paint(res.data);
+      });
+    }
+    if (cache.global) paint(cache.global); else box.innerHTML = loadingLine('Juntando las notas de todos…');
+    load();
+  };
+
+  VIEWS.personas = function () {
+    var me = S.auth.user();
+    view.innerHTML = logoHead() + '<h1 class="dag-display" style="margin-bottom:12px">Ranking</h1>' + rankSeg('personas') +
+      '<label class="dag-search app-searchrow">' + ic('search') +
+      '<input id="ps-q" type="search" placeholder="Buscá por @usuario" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Buscar personas por nombre de usuario" value="' + esc(ui.peopleQuery || '') + '"></label>' +
+      (S.community.needsUsername() ? '<p class="app-hint app-gap">Todavía no elegiste tu @, así que nadie te encuentra. <button type="button" class="app-linkbtn" data-username>Elegilo</button></p>' : '') +
+      '<div id="ps-list"></div>';
+    bindSettings();
+    var ub = view.querySelector('[data-username]');
+    if (ub) ub.addEventListener('click', openUsernameSheet);
+    var box = view.querySelector('#ps-list'), input = view.querySelector('#ps-q'), my = screenId, seq = 0, timer = null;
+    function load() {
+      var q = input.value.trim(), mine = ++seq;
+      S.community.searchUsers(q).then(function (res) {
+        if (my !== screenId || mine !== seq) return;
+        if (res.error) { commError(box, res.error, load); return; }
+        var list = res.data;
+        if (!list.length) {
+          box.innerHTML = '<p class="app-empty-line">' + (q ? 'Nadie con “' + esc(q) + '”. Probá con otra parte del @.' : 'Todavía nadie eligió su @.') + '</p>';
+          return;
+        }
+        box.innerHTML = (q ? '' : '<p class="dag-label app-gap">Los más activos</p>') + '<div class="dag-stack" style="gap:8px">' + list.map(function (u) {
+          var isMe = me && u.id === me.id;
+          return '<a class="dag-card app-person" href="#/persona/' + encodeURIComponent(u.id) + '"><span class="app-avatar" aria-hidden="true">' + esc(u.username.charAt(0).toUpperCase()) + '</span>' +
+            '<span class="app-person__info"><b>@' + esc(u.username) + (isMe ? ' <span class="dag-muted">(vos)</span>' : '') + '</b>' +
+            '<span class="dag-muted">' + plural(u.cafes, 'cafetería', 'cafeterías') + ' · ' + plural(u.visits, 'visita', 'visitas') + '</span></span>' +
+            '<span class="app-person__go">' + ic('ranking') + '</span></a>';
+        }).join('') + '</div>';
+      });
+    }
+    input.addEventListener('input', function () {
+      ui.peopleQuery = input.value;
+      clearTimeout(timer); timer = setTimeout(load, 280);
+    });
+    cleanup.push(function () { clearTimeout(timer); });
+    box.innerHTML = loadingLine('Buscando…');
+    load();
+  };
+
+  VIEWS.persona = function (r) {
+    view.innerHTML = topbar('', '') + '<div id="pp">' + loadingLine('Trayendo su ranking…') + '</div>';
+    bindBack('#/personas');
+    var box = view.querySelector('#pp'), my = screenId, me = S.auth.user();
+    function load() {
+      Promise.all([S.community.profile(r.id), S.community.userRanking(r.id)]).then(function (res) {
+        if (my !== screenId) return;
+        var prof = res[0], rk = res[1];
+        if (prof.error || rk.error) { commError(box, prof.error || rk.error, load); return; }
+        if (!prof.data) { box.innerHTML = '<div class="app-empty"><p>No encontramos a esa persona.</p><a class="dag-btn dag-btn--secondary" href="#/personas">Volver a Personas</a></div>'; return; }
+        var rows = rk.data, name = prof.data.username ? '@' + prof.data.username : 'Sin usuario', isMe = me && me.id === r.id;
+        var visits = rows.reduce(function (a, x) { return a + x.visits; }, 0);
+        document.title = name + ' · Directo al grano';
+        var html = '<div class="app-person-head"><span class="app-avatar app-avatar--lg" aria-hidden="true">' + esc((prof.data.username || '?').charAt(0).toUpperCase()) + '</span>' +
+          '<div style="min-width:0"><h1 class="dag-title app-detail-name">' + esc(name) + '</h1><p class="dag-cafe__meta">' +
+          (isMe ? 'Así te ven los demás · ' : '') + plural(rows.length, 'cafetería', 'cafeterías') + ' · ' + plural(visits, 'visita', 'visitas') + '</p></div></div>';
+        if (!rows.length) html += '<p class="app-empty-line">Todavía no reseñó ninguna cafetería.</p>';
+        else {
+          html += '<div class="dag-stack">' + rows.map(function (x, i) {
+            var meta = joinMeta([x.barrio, plural(x.visits, 'visita', 'visitas'), x.last_visit ? 'última ' + shortDate(x.last_visit) : '']);
+            return rankRow({ pos: i + 1, name: x.name, meta: meta, score: Number(x.score), i: i, heroLabel: i === 0 ? (isMe ? 'Tu número 1' : 'Su número 1') : '' });
+          }).join('') + '</div>';
+        }
+        box.innerHTML = html;
+        box.querySelectorAll('[data-i]').forEach(function (b) {
+          b.addEventListener('click', function () {
+            var i = +b.getAttribute('data-i'), x = rows[i];
+            openPlaceSheet(placeFromRow(x), joinMeta(['#' + (i + 1) + ' de ' + name, plural(x.visits, 'visita', 'visitas')]), Number(x.score));
+          });
+        });
+      });
+    }
+    load();
+  };
+
   // ================= DETALLE =================
   VIEWS.cafe = function (r) {
     var c = S.cafe(r.id);
@@ -255,7 +525,7 @@
     var s = S.stats(c.id), rank = S.rankOf(c.id), last = s.last;
     var aspectRows = S.ASPECTS.filter(function (a) { return s.aspects[a.key] != null; });
     var lastWithText = s.visits.find(function (v) { return v.text; });
-    var tags = last ? [last.drink, last.origin, last.roast ? 'Tueste ' + last.roast.toLowerCase() : '', last.method].filter(Boolean) : [];
+    var tags = last ? [last.drink, last.origin].filter(Boolean) : [];
 
     var html = topbar('', '<a class="dag-btn dag-btn--ghost dag-btn--icon" href="#/editar/' + (last ? last.id : '') + '" aria-label="Editar la última visita">' + ic('edit') + '</a>') +
       '<div class="app-detail-head"><div style="min-width:0">' +
@@ -344,46 +614,45 @@
     if (!m.fit(pts, pad)) m.centerOn(Geo.BA.lat, Geo.BA.lng, 12);
   }
 
-  /* cfg: mapEl, hintEl, addrInput, addrList, barrioInput() (opcional), pin (html), point ({lat,lng} o null) */
+  /* cfg: mapEl, hintEl, addrInput, addrList, pin (html), point ({lat,lng,barrio,placeId} o null)
+     El barrio ya no se escribe: sale solo del lugar elegido (o del punto tocado) y se guarda para las listas. */
   function placeFields(cfg) {
     var point = hasLL(cfg.point) ? { lat: cfg.point.lat, lng: cfg.point.lng } : null;
-    var addr = cfg.addrInput, addrTouched = !!addr.value, barrioAuto = false;
+    var placeId = (cfg.point && cfg.point.placeId) || '', barrio = (cfg.point && cfg.point.barrio) || '';
+    var addr = cfg.addrInput, addrTouched = !!addr.value;
     var m = MapView.mount(cfg.mapEl, { onTap: function (ll) { setPoint(ll); } });
 
     function hint() {
       if (!cfg.hintEl) return;
-      cfg.hintEl.textContent = !m ? '' : point ? 'Listo. Arrastrá el pin o tocá otro punto para corregirlo.' : 'Buscá la dirección o tocá el mapa para marcar el lugar.';
+      cfg.hintEl.textContent = !m ? '' : point ? 'Listo. Si el pin no quedó justo, arrastralo o tocá el lugar exacto.' : 'Buscala por nombre arriba o por dirección acá. También podés tocar el mapa.';
     }
     function sync(center) {
-      if (m) m.setPin(point ? point.lat : null, point ? point.lng : null, cfg.pin, function (ll) { setPoint(ll); });
+      if (m) m.setPin(point ? point.lat : null, point ? point.lng : null, cfg.pin, function (ll) { setPoint(ll, true); });
       if (m && center && point) m.centerOn(point.lat, point.lng, Math.max(16, m.map.getZoom()));
       hint();
     }
-    function fillBarrio(b) {
-      var bi = cfg.barrioInput && cfg.barrioInput();
-      if (bi && b && (!bi.value.trim() || barrioAuto)) { bi.value = b; bi.dispatchEvent(new Event('input')); barrioAuto = true; }
-    }
-    function setPoint(ll) {
+    // drag = corrección fina del pin: sigue siendo el mismo lugar
+    function setPoint(ll, drag) {
       point = { lat: ll.lat, lng: ll.lng }; sync(false);
-      if (addrTouched && addr.value.trim()) return;
+      if (drag && placeId) return;
+      placeId = '';
       var asked = point;
       Geo.reverse(ll.lat, ll.lng).then(function (pl) {
         if (!pl || point !== asked) return;
+        if (pl.barrio) barrio = pl.barrio;
+        if (addrTouched && addr.value.trim()) return;
         var a = pl.address || pl.name;
         if (a) { addr.value = a; addrTouched = false; }
-        fillBarrio(pl.barrio);
       }).catch(function () { /* sin conexión: queda el pin sin dirección */ });
     }
     function applyPlace(pl) {
       addr.value = pl.address || pl.name || ''; addrTouched = false;
-      fillBarrio(pl.barrio);
+      barrio = pl.barrio || barrio;
+      placeId = pl.placeId || '';
       point = { lat: pl.lat, lng: pl.lng }; sync(true);
     }
-    function watchBarrio(bi) { bi.addEventListener('input', function (e) { if (e.isTrusted) barrioAuto = false; }); }
 
     addr.addEventListener('input', function (e) { if (e.isTrusted) addrTouched = true; });
-    var bi0 = cfg.barrioInput && cfg.barrioInput();
-    if (bi0) watchBarrio(bi0);
     Geo.attach(addr, {
       list: cfg.addrList,
       near: function () { return point || (m ? m.center() : Geo.BA); },
@@ -394,11 +663,15 @@
     sync(false);
     return {
       point: function () { return point; },
+      placeId: function () { return placeId; },
+      barrio: function () { return barrio; },
       applyPlace: applyPlace,
-      clear: function () { point = null; addr.value = ''; addrTouched = false; sync(false); },
-      setExisting: function (c) { addr.value = c.address || ''; addrTouched = !!c.address; point = hasLL(c) ? { lat: c.lat, lng: c.lng } : null; sync(true); },
+      clear: function () { point = null; placeId = ''; barrio = ''; addr.value = ''; addrTouched = false; sync(false); },
+      setExisting: function (c) {
+        addr.value = c.address || ''; addrTouched = !!c.address; placeId = c.placeId || ''; barrio = c.barrio || '';
+        point = hasLL(c) ? { lat: c.lat, lng: c.lng } : null; sync(true);
+      },
       near: function () { return point || (m ? m.center() : Geo.BA); },
-      watchBarrio: watchBarrio,
       invalidate: function () { if (m) m.invalidate(); },
       destroy: function () { if (m) m.destroy(); }
     };
@@ -410,47 +683,49 @@
     var seed = wish || o.place || null;
     var st = {
       cafeId: o.cafeId && S.cafe(o.cafeId) ? o.cafeId : null,
-      name: seed ? seed.name || '' : '', barrio: seed ? seed.barrio || '' : '',
+      name: seed ? seed.name || '' : '', barrio: seed ? seed.barrio || '' : '', placeId: seed ? seed.placeId || '' : '',
       address: seed ? seed.address || '' : '', lat: seed ? seed.lat : null, lng: seed ? seed.lng : null
     };
-    if (st.cafeId) { var c0 = S.cafe(st.cafeId); st.address = c0.address; st.lat = c0.lat; st.lng = c0.lng; }
+    if (st.cafeId) { var c0 = S.cafe(st.cafeId); st.address = c0.address; st.lat = c0.lat; st.lng = c0.lng; st.barrio = c0.barrio; st.placeId = c0.placeId; }
     var food = v.food || null;
+    // un origen viejo que ya no está en la lista se sigue mostrando, para no perderlo al editar
+    var origins = !v.origin || S.BEAN.origin.indexOf(v.origin) >= 0 ? S.BEAN.origin : S.BEAN.origin.concat([v.origin]);
 
     var html = topbar(edit ? 'Editar visita' : 'Nueva review', '') +
       '<form id="rv" novalidate>' +
-      '<div class="dag-section"><p class="dag-label">Cafetería</p><div id="rv-cafe"></div>' +
-      '<label class="dag-field"><span class="app-field-label">¿Cuándo fuiste?</span><input class="dag-input" type="date" id="rv-date" value="' + esc(v.date || S.today()) + '" max="' + S.today() + '"></label></div>' +
-
-      '<div class="dag-section" id="rv-score-sec"><p class="dag-label">Tu nota</p><div class="dag-picker" id="rv-score"><div class="dag-picker__readout">' +
+      // 1. nombre
+      '<div class="dag-section"><p class="dag-label">Cafetería</p><div id="rv-cafe"></div></div>' +
+      // 2. ubicación real
+      '<div class="dag-section" id="rv-loc"><p class="dag-label">Ubicación</p><div class="app-pop"><label class="dag-search app-search-input">' + ic('map') +
+      '<input id="rv-address" placeholder="Dirección o lugar" autocomplete="off" aria-label="Ubicación" value="' + esc(st.address || '') + '"></label>' +
+      '<div id="rv-addr-suggest" class="app-suggest app-suggest--pop" hidden></div></div>' +
+      '<div class="dag-map app-pickmap" id="rv-map" aria-label="Mapa: tocá para marcar el lugar"></div>' +
+      '<p class="app-hint" id="rv-map-hint"></p></div>' +
+      // 3. fecha
+      '<div class="dag-section"><label class="dag-field"><span class="dag-label">Fecha</span><input class="dag-input" type="date" id="rv-date" value="' + esc(v.date || S.today()) + '" max="' + S.today() + '"></label></div>' +
+      // 4. puntuación
+      '<div class="dag-section" id="rv-score-sec"><p class="dag-label">Puntuación</p><div class="dag-picker" id="rv-score"><div class="dag-picker__readout">' +
       '<span class="dag-picker__value">' + (v.score || '–') + '</span><span class="dag-picker__of">/10</span>' +
       (v.score ? '<span class="dag-band-word" data-band-of="' + v.score + '"></span>' : '<span class="dag-band-word" data-band-of="0" hidden></span>') + '</div>' +
-      pickerScale(v.score, 'Nota del 1 al 10') + '</div><p class="app-error" id="rv-score-err" hidden>Falta la nota. Es lo único obligatorio.</p></div>' +
-
+      pickerScale(v.score, 'Nota del 1 al 10') + '</div><p class="app-error" id="rv-score-err" hidden>Falta la nota.</p></div>' +
+      // 5. aspectos
       '<div class="dag-section"><p class="dag-label">Aspectos <span class="app-label-opt">· opcional</span></p><div class="dag-card" style="padding:0 16px"><div class="dag-aspects">' +
       S.ASPECTS.map(function (a) {
         return '<div class="dag-aspect" data-aspect="' + a.key + '"><span class="dag-aspect__name">' + ic(a.icon) + a.name + '</span>' + beans((v.aspects && v.aspects[a.key]) || 0, a.name) + '</div>';
       }).join('') + '</div></div><p class="app-hint">No suman a la nota: la explican. Tocá el último grano otra vez para borrar.</p></div>' +
 
       '<div class="dag-section"><p class="dag-label">¿Qué tomaste?</p>' + chipGroup('drink', S.BEAN.drink, v.drink) + '</div>' +
-      '<div class="dag-section"><p class="dag-label">Origen del grano</p>' + chipGroup('origin', S.BEAN.origin, v.origin) + '</div>' +
-      '<div class="dag-section"><p class="dag-label">Tueste</p>' + chipGroup('roast', S.BEAN.roast, v.roast) + '</div>' +
-      '<div class="dag-section"><p class="dag-label">Método</p>' + chipGroup('method', S.BEAN.method, v.method) + '</div>' +
+      '<div class="dag-section"><p class="dag-label">Origen del grano</p>' + chipGroup('origin', origins, v.origin) + '</div>' +
 
       '<div class="dag-section"><label class="dag-field"><span class="dag-label">La review</span>' +
       '<textarea class="dag-textarea" id="rv-text" maxlength="600" placeholder="¿Cómo estuvo? Sin vueltas.">' + esc(v.text || '') + '</textarea>' +
-      '<span class="dag-field__hint"><span>Opcional</span><span id="rv-count">' + (v.text || '').length + '/600</span></span></label></div>' +
+      '<span class="dag-field__hint"><span>Opcional. Solo la ves vos.</span><span id="rv-count">' + (v.text || '').length + '/600</span></span></label></div>' +
 
       '<div class="dag-section"><div class="dag-card dag-food" data-open="' + !!food + '"><div class="dag-food__toggle">' + ic('food') +
       '<span class="dag-food__q" id="rv-food-q">¿Comiste algo?</span><button type="button" class="dag-switch" role="switch" aria-checked="' + !!food + '" aria-labelledby="rv-food-q"></button></div>' +
       '<div class="dag-food__body"><label class="dag-field"><span class="app-field-label">¿Qué comiste?</span><input class="dag-input" id="rv-food-name" placeholder="Medialuna, tostado, budín…" value="' + esc(food ? food.name : '') + '"></label>' +
       '<div class="dag-field"><span class="app-field-label">Nota de la comida</span><div class="dag-picker dag-picker--compact" id="rv-food-score">' + pickerScale(food ? food.score : 0, 'Nota de la comida del 1 al 10') + '</div></div>' +
       '<label class="dag-field"><span class="app-field-label">Comentario</span><input class="dag-input" id="rv-food-text" placeholder="Opcional" value="' + esc(food ? food.text : '') + '"></label></div></div></div>' +
-
-      '<div class="dag-section" id="rv-loc"><p class="dag-label">Ubicación</p><div class="app-pop"><label class="dag-search app-search-input">' + ic('search') +
-      '<input id="rv-address" placeholder="Buscá la dirección o el lugar" autocomplete="off" value="' + esc(st.address || '') + '"></label>' +
-      '<div id="rv-addr-suggest" class="app-suggest app-suggest--pop" hidden></div></div>' +
-      '<div class="dag-map app-pickmap" id="rv-map" aria-label="Mapa: tocá para marcar el lugar"></div>' +
-      '<p class="app-hint" id="rv-map-hint"></p></div>' +
 
       (edit ? '<button type="button" class="dag-btn dag-btn--ghost app-btn-danger-ghost" id="rv-delete">Borrar esta visita</button>' : '') +
       '<div class="app-savebar"><button type="submit" class="dag-btn dag-btn--block">' + ic('check') + (edit ? 'Guardar cambios' : 'Guardar review') + '</button></div>' +
@@ -464,7 +739,6 @@
     var loc = placeFields({
       mapEl: form.querySelector('#rv-map'), hintEl: form.querySelector('#rv-map-hint'),
       addrInput: form.querySelector('#rv-address'), addrList: form.querySelector('#rv-addr-suggest'),
-      barrioInput: function () { return form.querySelector('#rv-barrio'); },
       pin: pinCup(), point: hasLL(st) ? st : null
     });
     cleanup.push(loc.destroy);
@@ -483,17 +757,14 @@
           '<p class="dag-cafe__meta">' + joinMeta([c.barrio, plural(S.stats(c.id).n, 'visita', 'visitas')]) + '</p></div>' +
           (edit ? '' : '<button type="button" class="dag-btn dag-btn--ghost dag-btn--sm" id="rv-change">Cambiar</button>') + '</div>';
         var ch = box.querySelector('#rv-change');
-        if (ch) ch.addEventListener('click', function () { st.cafeId = null; st.name = ''; st.barrio = ''; loc.clear(); renderCafe(); box.querySelector('#rv-name').focus(); });
+        if (ch) ch.addEventListener('click', function () { st.cafeId = null; st.name = ''; loc.clear(); renderCafe(); box.querySelector('#rv-name').focus(); });
       } else {
-        box.innerHTML = '<div class="dag-stack"><div class="app-pop"><label class="dag-field"><span class="app-field-label">Nombre</span>' +
-          '<input class="dag-input" id="rv-name" placeholder="¿Dónde fuiste? Buscala por nombre" autocomplete="off" value="' + esc(st.name) + '"></label>' +
+        box.innerHTML = '<div class="app-pop"><label class="dag-field"><span class="app-field-label">Nombre</span>' +
+          '<span class="dag-search app-search-input">' + ic('search') + '<input id="rv-name" placeholder="Buscala por nombre" autocomplete="off" value="' + esc(st.name) + '"></span></label>' +
           '<div id="rv-suggest" class="app-suggest app-suggest--pop" hidden></div></div>' +
-          '<p class="app-error" id="rv-name-err" hidden>Poné el nombre de la cafetería.</p>' +
-          '<label class="dag-field"><span class="app-field-label">Barrio</span><input class="dag-input" id="rv-barrio" placeholder="Palermo, Almagro…" value="' + esc(st.barrio) + '"></label></div>';
-        var name = box.querySelector('#rv-name'), barrio = box.querySelector('#rv-barrio');
+          '<p class="app-error" id="rv-name-err" hidden>Poné el nombre de la cafetería.</p>';
+        var name = box.querySelector('#rv-name');
         name.addEventListener('input', function () { st.name = name.value; });
-        barrio.addEventListener('input', function () { st.barrio = barrio.value; });
-        loc.watchBarrio(barrio);
         Geo.attach(name, {
           list: box.querySelector('#rv-suggest'),
           near: loc.near,
@@ -501,12 +772,14 @@
             q = q.toLowerCase();
             var hits = q ? S.cafes().filter(function (c) { return c.name.toLowerCase().indexOf(q) >= 0; }).slice(0, 3) : [];
             return hits.length ? '<p class="app-suggest__head">Ya la tenés</p>' + hits.map(function (c) {
-              return '<button type="button" class="app-suggest__item" data-local="' + c.id + '">' + ic('cup') + '<span class="app-suggest__txt"><b>' + esc(c.name) + '</b><span class="dag-muted">' + esc(c.barrio) + '</span></span></button>';
+              return '<button type="button" class="app-suggest__item" data-local="' + c.id + '">' + ic('cup') + '<span class="app-suggest__txt"><b>' + esc(c.name) + '</b><span class="dag-muted">' + esc(joinMeta([c.address, c.barrio])) + '</span></span></button>';
             }).join('') : '';
           },
           onLocal: function (el) { pickExisting(S.cafe(el.getAttribute('data-local'))); },
           onPick: function (pl) {
-            var mine = pl.name && S.cafes().find(function (c) { return c.name.toLowerCase() === pl.name.toLowerCase() && (!hasLL(c) || Geo.km(c, pl) < 0.3); });
+            var mine = pl.name && S.cafes().find(function (c) {
+              return (pl.placeId && c.placeId === pl.placeId) || (c.name.toLowerCase() === pl.name.toLowerCase() && (!hasLL(c) || Geo.km(c, pl) < 0.3));
+            });
             if (mine) { pickExisting(mine); return; }
             if (pl.name) { name.value = pl.name; st.name = pl.name; }
             loc.applyPlace(pl);
@@ -591,20 +864,20 @@
       if (foodData && !foodData.name && !foodData.score && !foodData.text) foodData = null;
 
       var address = form.querySelector('#rv-address').value.trim();
-      var pt = loc.point();
+      var pt = loc.point(), placeId = loc.placeId(), barrio = loc.barrio();
       var cafeId = st.cafeId;
       if (!cafeId) {
-        var existing = S.findCafeByName(st.name);
+        var existing = (placeId && S.cafes().find(function (c) { return c.placeId === placeId; })) || S.findCafeByName(st.name);
         if (existing) cafeId = existing.id;
-        else cafeId = S.addCafe({ name: st.name, barrio: st.barrio, address: address, lat: pt ? pt.lat : null, lng: pt ? pt.lng : null }).id;
+        else cafeId = S.addCafe({ name: st.name, barrio: barrio, address: address, placeId: placeId, lat: pt ? pt.lat : null, lng: pt ? pt.lng : null }).id;
       }
-      var patch = { address: address || undefined };
+      var patch = { address: address || undefined, barrio: barrio || undefined, placeId: placeId || undefined };
       if (pt) { patch.lat = Math.round(pt.lat * 1e6) / 1e6; patch.lng = Math.round(pt.lng * 1e6) / 1e6; }
       S.updateCafe(cafeId, patch);
 
       var data = {
         cafeId: cafeId, score: score, date: form.querySelector('#rv-date').value || S.today(),
-        aspects: aspects, drink: chip('drink'), origin: chip('origin'), roast: chip('roast'), method: chip('method'),
+        aspects: aspects, drink: chip('drink'), origin: chip('origin'),
         text: text.value.trim(), food: foodData
       };
       if (edit) { S.updateVisit(v.id, data); toast('Cambios guardados.'); back('#/cafe/' + cafeId); return; }
@@ -796,7 +1069,6 @@
       '<div class="app-pop"><label class="dag-field"><span class="app-field-label">Nombre</span><input class="dag-input" id="wf-name" placeholder="Buscala por nombre" autocomplete="off"></label>' +
       '<div id="wf-suggest" class="app-suggest app-suggest--pop" hidden></div></div>' +
       '<p class="app-error" id="wf-err" hidden>Poné el nombre.</p>' +
-      '<label class="dag-field"><span class="app-field-label">Barrio</span><input class="dag-input" id="wf-barrio" placeholder="Opcional"></label>' +
       '<label class="dag-field"><span class="app-field-label">¿Por qué?</span><input class="dag-input" id="wf-why" placeholder="Quién te la recomendó, qué tienen…"></label>' +
       '<div class="app-pop"><label class="dag-search app-search-input">' + ic('search') + '<input id="wf-address" placeholder="Dirección (opcional)" autocomplete="off"></label>' +
       '<div id="wf-addr-suggest" class="app-suggest app-suggest--pop" hidden></div></div>' +
@@ -806,7 +1078,7 @@
         var loc = placeFields({
           mapEl: sheet.querySelector('#wf-map'), hintEl: sheet.querySelector('#wf-hint'),
           addrInput: sheet.querySelector('#wf-address'), addrList: sheet.querySelector('#wf-addr-suggest'),
-          barrioInput: function () { return sheet.querySelector('#wf-barrio'); }, pin: pinWish(), point: null
+          pin: pinWish(), point: null
         });
         setTimeout(function () { loc.invalidate(); }, 220); // el sheet sube animado
         var name = sheet.querySelector('#wf-name');
@@ -819,7 +1091,7 @@
           var n = name.value.trim();
           if (!n) { sheet.querySelector('#wf-err').hidden = false; name.focus(); return; }
           var pt = loc.point();
-          S.addWish({ name: n, barrio: sheet.querySelector('#wf-barrio').value, why: sheet.querySelector('#wf-why').value, address: sheet.querySelector('#wf-address').value, lat: pt ? pt.lat : null, lng: pt ? pt.lng : null });
+          S.addWish({ name: n, barrio: loc.barrio(), why: sheet.querySelector('#wf-why').value, address: sheet.querySelector('#wf-address').value, lat: pt ? pt.lat : null, lng: pt ? pt.lng : null });
           done(); render(); toast('Guardada. Ahora no te la olvidás.');
         });
         // el mapa se libera cuando se cierra el sheet
@@ -868,8 +1140,12 @@
       [['system', 'Como el teléfono'], ['light', 'Crema'], ['dark', 'Espresso']].map(function (t) {
         return '<button type="button" class="dag-chip" data-t="' + t[0] + '" aria-pressed="' + (pref === t[0]) + '">' + t[1] + '</button>';
       }).join('') + '</div></div>' +
+      (S.community.profileReady() === 'missing' ? '' :
+        '<div class="dag-section"><form class="dag-stack" id="st-user-form" novalidate>' + handleField('st-user', S.auth.username(), 'Nombre de usuario') +
+        '<p class="app-error" role="alert" hidden></p><button type="submit" class="dag-btn dag-btn--secondary dag-btn--block">Guardar</button></form>' +
+        '<p class="app-hint" style="margin-top:8px">Con tu @ te encuentran en Personas. Ven tu ranking y tus notas; tus textos y tu mail, no.</p></div>') +
       '<div class="dag-section"><p class="dag-label">Cuenta</p><p class="app-account">' +
-      (S.auth.name() ? '<b>' + esc(S.auth.name()) + '</b>' : '') + '<span>' + esc(S.auth.user() ? S.auth.user().email : '') + '</span></p>' +
+      (S.auth.username() ? '<b>@' + esc(S.auth.username()) + '</b>' : '') + '<span>' + esc(S.auth.user() ? S.auth.user().email : '') + '</span></p>' +
       '<button type="button" class="dag-btn dag-btn--secondary dag-btn--block" id="st-logout">Cerrar sesión</button></div>' +
       '<div class="dag-section"><p class="dag-label">Tus datos</p><p class="app-hint" style="margin:0">Se guardan en tu cuenta y los ves desde cualquier dispositivo. Igual podés bajarte una copia.</p>' +
       '<div class="app-sheet-actions"><button type="button" class="dag-btn dag-btn--secondary" id="st-export"' + (hasData ? '' : ' disabled') + '>Exportar</button>' +
@@ -880,6 +1156,21 @@
           var c = e.target.closest('[data-t]'); if (!c) return;
           S.setPref('theme', c.getAttribute('data-t')); applyTheme();
         });
+        var uf = sheet.querySelector('#st-user-form');
+        if (uf) {
+          var uin = uf.querySelector('#st-user'), mineNow = S.auth.username(), ucheck = wireHandle(uin, mineNow);
+          wireAuthForm(uf, 'Guardando…', function (fail) {
+            if (S.USERNAME.clean(uin.value) === mineNow) return fail('');
+            ucheck().then(function (bad) {
+              if (bad) return fail(bad, uin);
+              S.community.setUsername(uin.value).then(function (res) {
+                if (res.error) return fail(usernameError(res.error), uin);
+                mineNow = S.auth.username(); fail('');
+                toast('Listo: ahora sos @' + mineNow + '.');
+              });
+            });
+          });
+        }
         var ex = sheet.querySelector('#st-export');
         ex.addEventListener('click', function () {
           var blob = new Blob([S.exportJSON()], { type: 'application/json' });
@@ -1017,20 +1308,26 @@
   VIEWS.registro = function () {
     view.innerHTML = authShell('Registrate', 'Una cuenta y tus reviews te siguen a cualquier lado.',
       '<form class="dag-stack app-auth__form" novalidate>' +
-      field('au-name', 'Nombre <span class="dag-muted app-label-opt">(opcional)</span>', 'type="text" autocomplete="given-name" maxlength="40"') +
+      handleField('au-user', ui.authUser || '', 'Nombre de usuario') +
       field('au-email', 'Mail', 'type="email" autocomplete="email" inputmode="email" autocapitalize="none" spellcheck="false" required') +
       passField('au-pass', 'Contraseña', 'new-password', 'Mínimo ' + MIN_PASS + ' caracteres.') +
       '<p class="app-error" role="alert" hidden></p>' +
       '<button type="submit" class="dag-btn dag-btn--block">Crear cuenta</button></form>',
       '¿Ya tenés cuenta? <a href="#/entrar">Entrá</a>');
     var form = view.querySelector('form'); if (!form) return;
-    var name = form.querySelector('#au-name'), email = form.querySelector('#au-email'), pass = form.querySelector('#au-pass');
+    var handle = form.querySelector('#au-user'), email = form.querySelector('#au-email'), pass = form.querySelector('#au-pass');
+    var checkHandle = wireHandle(handle, '');
     if (ui.authEmail) email.value = ui.authEmail;
     wireAuthForm(form, 'Creando…', function (fail) {
       var em = email.value.trim(); ui.authEmail = em;
       if (!EMAIL_RE.test(em)) return fail('Ese mail no parece válido.', email);
       if (pass.value.length < MIN_PASS) return fail('La contraseña necesita al menos ' + MIN_PASS + ' caracteres.', pass);
-      S.auth.signUp(em, pass.value, name.value.trim()).then(function (res) {
+      var un = S.USERNAME.clean(handle.value); ui.authUser = un;
+      checkHandle().then(function (bad) {
+        if (bad) return fail(bad, handle);
+        return S.auth.signUp(em, pass.value, un);
+      }).then(function (res) {
+        if (!res) return; // ya se mostró el problema del @
         if (res.error) return fail(authError(res.error), res.error.code === 'user_already_exists' ? null : pass);
         if (res.needsConfirm) {
           view.querySelector('.app-auth').innerHTML = '<span class="app-empty__mark">' + DAG.icon('check') + '</span>' +
@@ -1113,9 +1410,10 @@
       navigatedInApp = false;
       setHash(S.auth.user() ? '#/ranking' : '#/entrar');
       render();
-      if (S.auth.user() && !S.loadError()) toast(S.auth.name() ? 'Hola, ' + S.auth.name() + '.' : 'Adentro.');
+      if (S.auth.user() && !S.loadError()) toast(S.auth.username() ? 'Hola, @' + S.auth.username() + '.' : 'Adentro.');
     }
     if (S.auth.takeRecovery()) openNewPassword();
+    else if (changed) maybeAskUsername();
   });
 
   S.auth.ready().then(function () {
@@ -1124,6 +1422,9 @@
     if (fromLink) setHash(S.auth.user() ? '#/ranking' : '#/entrar'); // saca los tokens de la URL
     render();
     if (S.auth.takeRecovery()) openNewPassword();
-    else if (fromLink && S.auth.user() && type === 'signup') toast('Mail confirmado. Ya estás adentro.');
+    else {
+      if (fromLink && S.auth.user() && type === 'signup') toast('Mail confirmado. Ya estás adentro.');
+      maybeAskUsername();
+    }
   });
 })();

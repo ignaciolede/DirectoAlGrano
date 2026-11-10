@@ -11,15 +11,13 @@
     { key: 'cafe', name: 'Café', icon: 'cup' },
     { key: 'lugar', name: 'Lugar', icon: 'place' },
     { key: 'atencion', name: 'Atención', icon: 'service' },
-    { key: 'precio', name: 'Precio/calidad', icon: 'price' },
-    { key: 'trabajo', name: 'Para trabajar', icon: 'laptop' }
+    { key: 'precio', name: 'Precio/calidad', icon: 'price' }
   ];
 
   var BEAN = {
     drink: ['Espresso', 'Cortado', 'Flat white', 'Latte', 'Capuccino', 'Filtro', 'Cold brew'],
-    origin: ['Etiopía', 'Colombia', 'Brasil', 'Blend', 'No sé'],
-    roast: ['Claro', 'Medio', 'Oscuro'],
-    method: ['Máquina', 'V60', 'Chemex', 'Aeropress', 'Cold brew']
+    origin: ['Etiopía', 'Colombia', 'Brasil', 'Kenia', 'Guatemala', 'Honduras', 'Costa Rica', 'Perú', 'Bolivia', 'Nicaragua',
+      'El Salvador', 'México', 'Panamá', 'Ecuador', 'Ruanda', 'Burundi', 'Tanzania', 'Indonesia', 'India', 'Yemen', 'Blend', 'No sé']
   };
 
   // ---------- Supabase ----------
@@ -33,6 +31,8 @@
   var db = empty();
   var user = null;
   var loadError = null;
+  // tu perfil público ({ id, username }); profileState: 'ok' | 'missing' (falta comunidad.sql) | 'error'
+  var profile = null, profileState = 'error';
 
   // ---------- preferencias (por dispositivo) ----------
   function loadPrefs() {
@@ -53,16 +53,31 @@
 
   // ---------- filas <-> objetos de la app ----------
   function str(v) { return v == null ? '' : String(v); }
+  // place_id solo viaja si hay uno y la columna existe (supabase/comunidad.sql la agrega)
+  var hasPlaceCol = true;
   function cafeRow(c) {
-    return { id: c.id, name: c.name, barrio: str(c.barrio), address: str(c.address), lat: coord(c.lat), lng: coord(c.lng), created_at: c.createdAt || Date.now() };
+    var row = { id: c.id, name: c.name, barrio: str(c.barrio), address: str(c.address), lat: coord(c.lat), lng: coord(c.lng), created_at: c.createdAt || Date.now() };
+    if (c.placeId && hasPlaceCol) row.place_id = c.placeId;
+    return row;
   }
   function cafeFrom(r) {
-    return { id: r.id, name: r.name, barrio: str(r.barrio), address: str(r.address), lat: r.lat, lng: r.lng, createdAt: Number(r.created_at) };
+    return { id: r.id, name: r.name, barrio: str(r.barrio), address: str(r.address), lat: r.lat, lng: r.lng, placeId: str(r.place_id), createdAt: Number(r.created_at) };
+  }
+  // Si la base todavía no tiene la columna place_id, se reintenta sin ella (y no se vuelve a mandar).
+  function cafeWrite(rows, make) {
+    return make(rows).then(function (res) {
+      if (res && res.error && /place_id/.test(res.error.message || '')) {
+        hasPlaceCol = false;
+        (Array.isArray(rows) ? rows : [rows]).forEach(function (r) { delete r.place_id; });
+        return make(rows);
+      }
+      return res;
+    });
   }
   function visitRow(v) {
     return {
       id: v.id, cafe_id: v.cafeId, score: v.score, visited_on: v.date,
-      drink: v.drink || null, origin: v.origin || null, roast: v.roast || null, method: v.method || null,
+      drink: v.drink || null, origin: v.origin || null, roast: null, method: null,
       aspects: v.aspects || {}, review: str(v.text), food: v.food || null, created_at: v.createdAt || Date.now()
     };
   }
@@ -107,19 +122,27 @@
 
   function insert(table, obj) {
     var row = TO_ROW[table](obj);
-    run([function () { return sb.from(table).insert(row); }]);
+    run([function () { return cafeWrite(row, function (r) { return sb.from(table).insert(r); }); }]);
   }
   // Import: una tanda por tabla.
   function insertSteps(b) {
     return ['cafes', 'visits', 'wishlist'].filter(function (t) { return b[t].length; }).map(function (t) {
-      return function () { return sb.from(t).insert(b[t].map(TO_ROW[t])); };
+      return function () { return cafeWrite(b[t].map(TO_ROW[t]), function (r) { return sb.from(t).insert(r); }); };
     });
   }
 
   function fetchAll(table) {
-    return sb.from(table).select('*').order('created_at', { ascending: true }).range(0, 9999).then(check).then(function (res) { return res.data || []; });
+    return sb.from(table).select('*').eq('user_id', user.id).order('created_at', { ascending: true }).range(0, 9999).then(check).then(function (res) { return res.data || []; });
+  }
+  function loadProfile() {
+    profile = null; profileState = 'error';
+    return sb.from('profiles').select('id, username').eq('id', user.id).maybeSingle().then(function (res) {
+      if (res.error) { profileState = res.error.code === '42P01' || res.error.code === '42703' ? 'missing' : 'error'; return; }
+      profile = res.data || { id: user.id, username: null }; profileState = 'ok';
+    }, function () { profileState = 'error'; });
   }
   function loadRemote() {
+    var prof = loadProfile(); // en paralelo; nunca falla, así que no frena ni rompe la carga
     return Promise.all([fetchAll('cafes'), fetchAll('visits'), fetchAll('wishlist')]).then(function (r) {
       db = {
         cafes: r[0].map(cafeFrom),
@@ -131,7 +154,7 @@
       db = empty();
       loadError = err;
       report(err);
-    });
+    }).then(function () { return prof; });
   }
 
   function migrate(d) {
@@ -222,14 +245,14 @@
 
   // ---------- escritura ----------
   function addCafe(data) {
-    var c = { id: uid(), name: data.name.trim(), barrio: (data.barrio || '').trim(), address: (data.address || '').trim(), lat: coord(data.lat), lng: coord(data.lng), createdAt: stamp() };
+    var c = { id: uid(), name: data.name.trim(), barrio: (data.barrio || '').trim(), address: (data.address || '').trim(), lat: coord(data.lat), lng: coord(data.lng), placeId: data.placeId || '', createdAt: stamp() };
     db.cafes.push(c); insert('cafes', c); return c;
   }
   function updateCafe(id, patch) {
     var c = cafe(id); if (!c) return null;
     Object.keys(patch).forEach(function (k) { if (patch[k] !== undefined) c[k] = patch[k]; });
     var row = cafeRow(c); delete row.id; delete row.created_at;
-    run([function () { return sb.from('cafes').update(row).eq('id', id); }]);
+    run([function () { return cafeWrite(row, function (r) { return sb.from('cafes').update(r).eq('id', id); }); }]);
     return c;
   }
   function addVisit(data) {
@@ -333,7 +356,7 @@
     user = next;
     if (event === 'PASSWORD_RECOVERY') recovery = true;
     if (changed) {
-      db = empty(); loadError = null;
+      db = empty(); loadError = null; profile = null; profileState = 'error';
       queue = Promise.resolve();
       loading = next ? loadRemote() : Promise.resolve();
     }
@@ -356,7 +379,7 @@
     configured: function () { return !!sb; },
     ready: function () { return ready; },
     user: function () { return user; },
-    name: function () { return user && user.user_metadata && user.user_metadata.name ? user.user_metadata.name : ''; },
+    username: function () { return profile && profile.username ? profile.username : ''; },
     onChange: function (fn) { authListeners.push(fn); },
     fromEmailLink: function () { return /(^#|&)(access_token|error_description)=/.test(initialHash); },
     linkType: function () { var m = initialHash.match(/(?:^#|&)type=([a-z_]+)/); return m ? m[1] : ''; },
@@ -366,8 +389,8 @@
       return sb.auth.signInWithPassword({ email: email, password: password }).then(function (res) { return { error: res.error }; });
     },
     // Si el proyecto pide confirmar el mail, no hay sesión hasta que se toca el link.
-    signUp: function (email, password, name) {
-      return sb.auth.signUp({ email: email, password: password, options: { data: { name: name || '' }, emailRedirectTo: redirectUrl() } }).then(function (res) {
+    signUp: function (email, password, username) {
+      return sb.auth.signUp({ email: email, password: password, options: { data: { username: username }, emailRedirectTo: redirectUrl() } }).then(function (res) {
         if (res.error) return { error: res.error };
         var u = res.data && res.data.user;
         // Con confirmación activada, un mail ya registrado vuelve "ok" pero sin identidades.
@@ -387,8 +410,72 @@
     }
   };
 
+  // ---------- comunidad (supabase/comunidad.sql) ----------
+  // Todo pasa por funciones de la base que devuelven solo nombre de cafetería, ubicación y notas:
+  // nunca mails ni el texto de las reviews. Devuelven { data, error }; error.missing = falta correr el SQL.
+  function rpc(fn, args) {
+    if (!sb || !user) return Promise.resolve({ data: null, error: { message: 'sin sesión' } });
+    return sb.rpc(fn, args || {}).then(function (res) {
+      if (res.error && (res.error.code === 'PGRST202' || res.error.code === '42883' || res.error.code === '42P01')) res.error.missing = true;
+      return { data: res.data || [], error: res.error };
+    }, function (err) { return { data: null, error: err }; });
+  }
+  var Community = {
+    searchUsers: function (q) { return rpc('search_users', { q: q || '' }); },
+    userRanking: function (id) { return rpc('user_ranking', { uid: id }); },
+    globalRanking: function () { return rpc('global_ranking'); },
+    profile: function (id) {
+      return sb.from('profiles').select('id, username').eq('id', id).maybeSingle().then(function (res) {
+        if (res.error && (res.error.code === '42P01' || res.error.code === '42703')) res.error.missing = true;
+        return { data: res.data, error: res.error };
+      });
+    },
+    // null = no se pudo saber (sin conexión o falta comunidad.sql)
+    usernameAvailable: function (u) {
+      if (!sb) return Promise.resolve(null);
+      return sb.rpc('username_available', { u: u }).then(function (res) { return res.error ? null : !!res.data; }, function () { return null; });
+    },
+    // Tenés que elegir @ si la comunidad está activa y todavía no tenés uno.
+    needsUsername: function () { return !!user && profileState === 'ok' && !(profile && profile.username); },
+    profileReady: function () { return profileState; },
+    reloadProfile: function () { return user ? loadProfile() : Promise.resolve(); },
+    setUsername: function (u) {
+      u = USERNAME.clean(u);
+      return sb.from('profiles').upsert({ id: user.id, username: u }).then(function (res) {
+        if (res.error) {
+          var e = res.error;
+          if (e.code === '23505') e.taken = true;
+          if (e.code === '23514') e.invalid = true;
+          if (e.code === '42P01' || e.code === '42703') e.missing = true;
+          return { error: e };
+        }
+        profile = { id: user.id, username: u }; profileState = 'ok';
+        return { error: null };
+      });
+    }
+  };
+
+  // @usuario: 3 a 20; minúsculas, números, punto y guion bajo; no empieza ni termina en punto (igual que en la base)
+  var USERNAME = {
+    re: /^[a-z0-9_][a-z0-9_.]{1,18}[a-z0-9_]$/,
+    clean: function (v) { return String(v || '').trim().replace(/^@+/, '').toLowerCase(); },
+    // de un texto cualquiera ("Nacho Lede") a una sugerencia válida ("nacho_lede")
+    suggest: function (v) {
+      var s = String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9_.]+/g, '_').replace(/^[._]+|[._]+$/g, '').slice(0, 20);
+      return s.length >= 3 ? s : '';
+    },
+    problem: function (u) {
+      if (!u) return 'Elegí un nombre de usuario.';
+      if (u.length < 3) return 'Mínimo 3 caracteres.';
+      if (u.length > 20) return 'Máximo 20 caracteres.';
+      if (/[^a-z0-9_.]/.test(u)) return 'Solo minúsculas, números, punto y guion bajo.';
+      if (!USERNAME.re.test(u)) return 'No puede empezar ni terminar con punto.';
+      return '';
+    }
+  };
+
   window.Store = {
-    ASPECTS: ASPECTS, BEAN: BEAN, today: today,
+    ASPECTS: ASPECTS, BEAN: BEAN, USERNAME: USERNAME, today: today,
     cafes: function () { return db.cafes.slice(); },
     visits: function () { return db.visits.slice().sort(byDateDesc); },
     wishlist: function () { return db.wishlist.slice(); },
@@ -400,6 +487,7 @@
     loadError: function () { return loadError; },
     reload: function () { loading = loadRemote(); return loading; },
     onError: function (fn) { errorHandlers.push(fn); },
-    auth: Auth
+    auth: Auth,
+    community: Community
   };
 })();
