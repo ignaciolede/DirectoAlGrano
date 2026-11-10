@@ -1555,6 +1555,7 @@
   };
 
   // ---------- arranque ----------
+  Geo.setLinkResolver(S.community.resolveMapsLink);
   tabbar.addEventListener('click', function () { navigatedInApp = true; });
   view.addEventListener('click', function (e) { if (e.target.closest('a[href^="#/"]')) navigatedInApp = true; });
   DAG.hydrate(tabbar);

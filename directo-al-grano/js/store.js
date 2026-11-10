@@ -435,6 +435,20 @@
       if (!sb) return Promise.resolve(null);
       return sb.rpc('username_available', { u: u }).then(function (res) { return res.error ? null : !!res.data; }, function () { return null; });
     },
+    // Abre un link corto de Google Maps con la función maps-link (supabase/functions/maps-link). → Promise<[urls]>
+    resolveMapsLink: function (url) {
+      if (!sb || !user) return Promise.reject(new Error('sin sesión'));
+      return sb.functions.invoke('maps-link', { body: { url: url } }).then(function (res) {
+        if (res.error) {
+          var status = res.error.context && res.error.context.status;
+          var e = new Error(res.error.message || 'maps-link');
+          e.missing = status === 404; e.notFound = status === 422;
+          throw e;
+        }
+        var d = res.data || {};
+        return d.chain && d.chain.length ? d.chain : d.url ? [d.url] : [];
+      });
+    },
     // Tenés que elegir @ si la comunidad está activa y todavía no tenés uno.
     needsUsername: function () { return !!user && profileState === 'ok' && !(profile && profile.username); },
     profileReady: function () { return profileState; },

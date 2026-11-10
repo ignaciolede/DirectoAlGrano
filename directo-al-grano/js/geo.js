@@ -125,6 +125,10 @@
     return near ? u + '/@' + near.lat.toFixed(5) + ',' + near.lng.toFixed(5) + ',13z' : u;
   }
 
+  // quién abre los links cortos (lo pone la app: necesita Supabase). fn(url) → Promise<[urls]>
+  var linkResolver = null;
+  function setLinkResolver(fn) { linkResolver = fn; }
+
   function fmtKm(d) {
     if (d == null || d >= 100) return ''; // lejos: el país/ciudad ya lo dice
     if (d < 1) return 'a ' + Math.max(50, Math.round(d * 1000 / 50) * 50) + ' m';
@@ -164,19 +168,39 @@
       list.hidden = !(local || remote);
     }
     // Pegaron un link de Google Maps: se lee el link en vez de buscar.
+    var linkSeq = 0;
+    function showLinkPlace(pl) {
+      results = [{ name: pl.name, address: '', barrio: '', city: '', country: '', lat: pl.lat, lng: pl.lng, kind: 'link', food: 3, placeId: '', fromLink: true, km: null }];
+      paint('done');
+    }
+    function linkFail(text) {
+      results = [];
+      linkMsg = '<p class="app-suggest__state">' + text + '</p>';
+      paint('link');
+    }
+    var COPY_TIP = 'En Maps tocá la dirección del lugar para copiarla y pegala ' + where + ', o marcala con «Marcar en el mapa».';
     function fromLink(q) {
       clearTimeout(timer); if (ctrl) ctrl.abort(); last = '';
+      var mine = ++linkSeq;
       var pl = parseMapsLink(q);
-      if (pl) {
-        results = [{ name: pl.name, address: '', barrio: '', city: '', country: '', lat: pl.lat, lng: pl.lng, kind: 'link', food: 3, placeId: '', fromLink: true, km: null }];
-        paint('done');
-        return;
-      }
-      results = [];
-      linkMsg = '<p class="app-suggest__state">' + (SHORT_LINK.test(q)
-        ? 'Los links que comparte la app de Maps no traen la ubicación. Mejor: en Maps tocá la dirección del lugar para copiarla y pegala ' + where + '.'
-        : 'Ese link de Google Maps no trae la ubicación. En Maps tocá la dirección del lugar para copiarla y pegala ' + where + '.') + '</p>';
-      paint('link');
+      if (pl) { showLinkPlace(pl); return; }
+      if (!SHORT_LINK.test(q) || !linkResolver) { linkFail('Ese link no trae la ubicación. ' + COPY_TIP); return; }
+      // link corto (maps.app.goo.gl…): se abre del lado del servidor y se lee adónde lleva
+      results = []; linkMsg = '<p class="app-suggest__state">Abriendo el link…</p>'; paint('link');
+      linkResolver(q).then(function (chain) {
+        if (mine !== linkSeq || input.value.trim() !== q) return;
+        for (var i = chain.length - 1; i >= 0; i--) { var p = parseMapsLink(chain[i]); if (p) { showLinkPlace(p); return; } }
+        // share.google y similares: llevan a una búsqueda con el nombre, sin ubicación
+        var name = '';
+        chain.slice().reverse().some(function (u) { var m = /\/(search|maps)/.test(u) && u.match(/[?&]q=([^&]+)/); if (m && !/^-?\d/.test(m[1])) { name = words(m[1]); return true; } return false; });
+        linkFail(name ? 'Ese link trae el nombre («' + esc(name) + '») pero no la ubicación. Compartí el lugar desde la app de Google Maps (link maps.app.goo.gl), o ' + COPY_TIP.charAt(0).toLowerCase() + COPY_TIP.slice(1)
+          : 'No encontré la ubicación en ese link. ' + COPY_TIP);
+      }, function (err) {
+        if (mine !== linkSeq || input.value.trim() !== q) return;
+        linkFail(err && err.missing ? 'Para leer links cortos falta activar la función maps-link en Supabase. ' + COPY_TIP
+          : err && err.notFound ? 'Ese link no existe o venció. Compartí el lugar de nuevo desde Maps.'
+          : 'No pude abrir el link. ¿Tenés conexión? ' + COPY_TIP);
+      });
     }
     input.addEventListener('input', function () {
       var q = input.value.trim();
@@ -217,5 +241,5 @@
     return { close: close };
   }
 
-  window.Geo = { BA: BA, search: search, isMapsLink: isMapsLink, parseMapsLink: parseMapsLink, mapsSearchUrl: mapsSearchUrl, reverse: reverse, attach: attach, km: km, fmtKm: fmtKm, sub: sub };
+  window.Geo = { BA: BA, search: search, setLinkResolver: setLinkResolver, isMapsLink: isMapsLink, parseMapsLink: parseMapsLink, mapsSearchUrl: mapsSearchUrl, reverse: reverse, attach: attach, km: km, fmtKm: fmtKm, sub: sub };
 })();
