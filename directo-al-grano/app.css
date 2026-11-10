@@ -305,3 +305,8 @@ button.app-rowbtn { appearance: none; border: 0; width: 100%; font: inherit; col
 
 .app-suggest__gmaps { text-decoration: none; }
 .app-suggest__gmaps .app-suggest__txt span { white-space: normal; }
+
+/* ubicación: pista + "Estoy acá" debajo del mapa */
+.app-loc-foot { display: flex; align-items: flex-start; gap: var(--space-3); margin-top: var(--space-2); }
+.app-loc-foot .app-hint { flex: 1; min-width: 0; }
+.app-loc-foot .dag-btn { flex: none; }

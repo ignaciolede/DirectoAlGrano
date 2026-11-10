@@ -136,6 +136,7 @@
      opts.onPick(place); opts.onLocal(el) para clicks en ítems propios. */
   function attach(input, opts) {
     var list = opts.list, timer = null, last = '', results = [], linkMsg = '';
+    var where = opts.pasteWhere || 'acá'; // dónde pegar una dirección copiada de Maps
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function icon(n) { return '<span class="dag-icon">' + window.DirectoAlGrano.icon(n) + '</span>'; }
     function paint(state) {
@@ -143,12 +144,12 @@
       var local = opts.local ? opts.local(q) : '';
       var remote = '';
       var gmaps = '<a class="app-suggest__item app-suggest__gmaps" href="' + esc(mapsSearchUrl(q, opts.near ? opts.near() : null)) + '" target="_blank" rel="noopener">' + icon('route') +
-        '<span class="app-suggest__txt"><b>Abrir en Google Maps</b><span class="dag-muted">Fijate dónde queda y tocá ese punto en el mapa de acá.</span></span></a>';
+        '<span class="app-suggest__txt"><b>Abrir en Google Maps</b><span class="dag-muted">Tocá la dirección del lugar para copiarla y pegala ' + where + '.</span></span></a>';
       if (state === 'link') remote = linkMsg;
       else if (state === 'picking') remote = '<p class="app-suggest__state">Ubicándola…</p>';
       else if (state === 'loading') remote = '<p class="app-suggest__state">Buscando en el mapa…</p>';
       else if (state === 'error') remote = '<p class="app-suggest__state">No pude buscar en el mapa. ¿Tenés conexión?</p>' + gmaps;
-      else if (state === 'done' && !results.length) remote = '<p class="app-suggest__state">No aparece en el mapa. Buscala en Google Maps, o pegá acá el link largo de Maps (el de la barra del navegador).</p>' + gmaps;
+      else if (state === 'done' && !results.length) remote = '<p class="app-suggest__state">No aparece en el mapa. Copiá su dirección desde Google Maps y pegala ' + where + ': las direcciones sí las encuentra.</p>' + gmaps;
       else if (state === 'done') {
         remote = '<p class="app-suggest__head">' + (results[0].fromLink ? 'Del link de Google Maps' : 'En el mapa') + '</p>' + results.map(function (pl, i) {
           return '<button type="button" class="app-suggest__item" data-place="' + i + '">' + icon(pl.food ? 'cup' : 'map') +
@@ -170,8 +171,8 @@
       }
       results = [];
       linkMsg = '<p class="app-suggest__state">' + (SHORT_LINK.test(q)
-        ? 'Ese link corto no trae la ubicación. Abrilo, y copiá el link largo de la barra del navegador (el que dice google.com/maps/place/…). O tocá el lugar en el mapa.'
-        : 'Ese link de Google Maps no trae la ubicación. Abrí el lugar en Maps y copiá el link de la barra del navegador.') + '</p>';
+        ? 'Los links que comparte la app de Maps no traen la ubicación. Mejor: en Maps tocá la dirección del lugar para copiarla y pegala ' + where + '.'
+        : 'Ese link de Google Maps no trae la ubicación. En Maps tocá la dirección del lugar para copiarla y pegala ' + where + '.') + '</p>';
       paint('link');
     }
     input.addEventListener('input', function () {

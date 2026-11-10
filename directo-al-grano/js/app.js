@@ -624,8 +624,29 @@
 
     function hint() {
       if (!cfg.hintEl) return;
-      cfg.hintEl.textContent = !m ? '' : point ? 'Listo. Si el pin no quedó justo, arrastralo o tocá el lugar exacto.' : 'Buscala por nombre (o pegá el link largo de Google Maps). Si no aparece, tocá el lugar en el mapa.';
+      cfg.hintEl.textContent = !m ? '' : point ? 'Listo. Si el pin no quedó justo, arrastralo o tocá el lugar exacto.'
+        : 'Si no aparece por nombre: en Google Maps tocá la dirección del lugar para copiarla y pegala arriba' + (cfg.hereBtn ? ', o tocá «Estoy acá».' : '.');
     }
+    // "Estoy acá": la ubicación del teléfono (para reseñar desde la cafetería)
+    function here() {
+      var b = cfg.hereBtn;
+      function say(t) { if (cfg.hintEl) cfg.hintEl.textContent = t; }
+      if (!navigator.geolocation) { say('Este navegador no comparte la ubicación. Tocá el lugar en el mapa.'); return; }
+      b.disabled = true; say('Buscando dónde estás…');
+      navigator.geolocation.getCurrentPosition(function (pos) {
+        b.disabled = false;
+        addrTouched = false; // que la dirección se complete sola
+        setPoint({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        if (m) m.centerOn(point.lat, point.lng, 17);
+        var acc = Math.round(pos.coords.accuracy || 0);
+        if (acc > 60) say('Ubicación aproximada (±' + acc + ' m). Si el pin no quedó en la puerta, arrastralo.');
+      }, function (err) {
+        b.disabled = false;
+        say(err && err.code === 1 ? 'No diste permiso de ubicación. Activalo para este sitio en el navegador, o tocá el lugar en el mapa.'
+          : 'No pude saber dónde estás. Probá de nuevo o tocá el lugar en el mapa.');
+      }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
+    }
+    if (cfg.hereBtn) cfg.hereBtn.addEventListener('click', here);
     function sync(center) {
       if (m) m.setPin(point ? point.lat : null, point ? point.lng : null, cfg.pin, function (ll) { setPoint(ll, true); });
       if (m && center && point) m.centerOn(point.lat, point.lng, Math.max(16, m.map.getZoom()));
@@ -700,7 +721,8 @@
       '<input id="rv-address" placeholder="Dirección o lugar" autocomplete="off" aria-label="Ubicación" value="' + esc(st.address || '') + '"></label>' +
       '<div id="rv-addr-suggest" class="app-suggest app-suggest--pop" hidden></div></div>' +
       '<div class="dag-map app-pickmap" id="rv-map" aria-label="Mapa: tocá para marcar el lugar"></div>' +
-      '<p class="app-hint" id="rv-map-hint"></p></div>' +
+      '<div class="app-loc-foot"><p class="app-hint" id="rv-map-hint"></p>' +
+      '<button type="button" class="dag-btn dag-btn--secondary dag-btn--sm" id="rv-here">' + ic('route') + 'Estoy acá</button></div></div>' +
       // 3. fecha
       '<div class="dag-section"><label class="dag-field"><span class="dag-label">Fecha</span><input class="dag-input" type="date" id="rv-date" value="' + esc(v.date || S.today()) + '" max="' + S.today() + '"></label></div>' +
       // 4. puntuación
@@ -737,7 +759,7 @@
 
     // --- ubicación (va primero: el nombre la usa) ---
     var loc = placeFields({
-      mapEl: form.querySelector('#rv-map'), hintEl: form.querySelector('#rv-map-hint'),
+      mapEl: form.querySelector('#rv-map'), hintEl: form.querySelector('#rv-map-hint'), hereBtn: form.querySelector('#rv-here'),
       addrInput: form.querySelector('#rv-address'), addrList: form.querySelector('#rv-addr-suggest'),
       pin: pinCup(), point: hasLL(st) ? st : null
     });
@@ -768,6 +790,7 @@
         Geo.attach(name, {
           list: box.querySelector('#rv-suggest'),
           near: loc.near,
+          pasteWhere: 'en Ubicación',
           local: function (q) {
             q = q.toLowerCase();
             var hits = q ? S.cafes().filter(function (c) { return c.name.toLowerCase().indexOf(q) >= 0; }).slice(0, 3) : [];
@@ -781,7 +804,8 @@
               return (pl.placeId && c.placeId === pl.placeId) || (c.name.toLowerCase() === pl.name.toLowerCase() && (!hasLL(c) || Geo.km(c, pl) < 0.3));
             });
             if (mine) { pickExisting(mine); return; }
-            if (pl.name) { name.value = pl.name; st.name = pl.name; }
+            // si pegaron una dirección en el nombre, se usa para la ubicación y el nombre queda por escribir
+            if (pl.name) { name.value = pl.name; st.name = pl.name; } else { name.value = ''; st.name = ''; }
             loc.applyPlace(pl);
             form.querySelector('#rv-name-err').hidden = true;
           }
@@ -1083,7 +1107,7 @@
         setTimeout(function () { loc.invalidate(); }, 220); // el sheet sube animado
         var name = sheet.querySelector('#wf-name');
         Geo.attach(name, {
-          list: sheet.querySelector('#wf-suggest'), near: loc.near,
+          list: sheet.querySelector('#wf-suggest'), near: loc.near, pasteWhere: 'en Dirección',
           onPick: function (pl) { if (pl.name) name.value = pl.name; loc.applyPlace(pl); sheet.querySelector('#wf-err').hidden = true; }
         });
         sheet.querySelector('#wf').addEventListener('submit', function (e) {
