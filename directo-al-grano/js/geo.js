@@ -94,6 +94,37 @@
     });
   }
 
+  // ---------- links de Google Maps ----------
+  // Los largos (google.com/maps/place/Nombre/@lat,lng…!3dLAT!4dLNG) traen nombre y ubicación: se leen acá, sin pedir nada.
+  // Los cortos (maps.app.goo.gl, share.google) no la traen sin abrirlos, y desde la página no se pueden abrir.
+  var MAPS_LINK = /^\s*(https?:\/\/)?((www\.|maps\.)?google\.[a-z.]+\/maps|maps\.google\.[a-z.]+|maps\.app\.goo\.gl|goo\.gl\/maps|share\.google)/i;
+  var SHORT_LINK = /^\s*(https?:\/\/)?(maps\.app\.goo\.gl|goo\.gl\/maps|share\.google)/i;
+  function isMapsLink(q) { return MAPS_LINK.test(q); }
+  function num(v) { var n = parseFloat(v); return isFinite(n) ? n : null; }
+  function okLL(lat, lng) { return lat != null && lng != null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0); }
+  function words(v) { try { return decodeURIComponent(v.replace(/\+/g, ' ')).trim(); } catch (e) { return v.replace(/\+/g, ' ').trim(); } }
+  // Devuelve { name, lat, lng } o null si el link no trae ubicación.
+  function parseMapsLink(url) {
+    url = url.trim();
+    var lat = null, lng = null, name = '', m;
+    // 1) la del lugar en sí (lo más exacto)
+    if ((m = url.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/))) { lat = num(m[1]); lng = num(m[2]); }
+    // 2) q / query / ll / center con coordenadas
+    if (!okLL(lat, lng) && (m = url.match(/[?&](?:q|query|ll|center|destination)=(-?\d+(?:\.\d+)?)(?:,|%2C)\s*(-?\d+(?:\.\d+)?)/i))) { lat = num(m[1]); lng = num(m[2]); }
+    // 3) el centro del mapa (@lat,lng,zoom): cerca del lugar cuando el link es de un lugar
+    if (!okLL(lat, lng) && (m = url.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/))) { lat = num(m[1]); lng = num(m[2]); }
+    if (!okLL(lat, lng)) return null;
+    if ((m = url.match(/\/maps\/place\/([^/@?]+)/))) name = words(m[1]);
+    else if ((m = url.match(/[?&](?:q|query)=([^&]+)/)) && !/^-?\d+(\.\d+)?(,|%2C)/i.test(m[1])) name = words(m[1]);
+    if (/^-?\d+(\.\d+)?,\s*-?\d+(\.\d+)?$/.test(name)) name = ''; // "/place/-34.6,-58.4" no es un nombre
+    return { name: name, lat: lat, lng: lng };
+  }
+  // Link para buscar en Google Maps lo que no aparece acá (cerca de donde estás mirando).
+  function mapsSearchUrl(q, near) {
+    var u = 'https://www.google.com/maps/search/' + encodeURIComponent(q + ', Argentina');
+    return near ? u + '/@' + near.lat.toFixed(5) + ',' + near.lng.toFixed(5) + ',13z' : u;
+  }
+
   function fmtKm(d) {
     if (d == null || d >= 100) return ''; // lejos: el país/ciudad ya lo dice
     if (d < 1) return 'a ' + Math.max(50, Math.round(d * 1000 / 50) * 50) + ' m';
@@ -104,28 +135,48 @@
      opts.list: contenedor; opts.near(): {lat,lng}; opts.local(q): html de resultados propios (opcional);
      opts.onPick(place); opts.onLocal(el) para clicks en ítems propios. */
   function attach(input, opts) {
-    var list = opts.list, timer = null, last = '', results = [];
+    var list = opts.list, timer = null, last = '', results = [], linkMsg = '';
     function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
     function icon(n) { return '<span class="dag-icon">' + window.DirectoAlGrano.icon(n) + '</span>'; }
     function paint(state) {
       var q = input.value.trim();
       var local = opts.local ? opts.local(q) : '';
       var remote = '';
-      if (state === 'loading') remote = '<p class="app-suggest__state">Buscando en el mapa…</p>';
-      else if (state === 'error') remote = '<p class="app-suggest__state">No pude buscar en el mapa. ¿Tenés conexión?</p>';
-      else if (state === 'done' && !results.length) remote = '<p class="app-suggest__state">En el mapa no aparece. Marcala tocando el mapa.</p>';
+      var gmaps = '<a class="app-suggest__item app-suggest__gmaps" href="' + esc(mapsSearchUrl(q, opts.near ? opts.near() : null)) + '" target="_blank" rel="noopener">' + icon('route') +
+        '<span class="app-suggest__txt"><b>Abrir en Google Maps</b><span class="dag-muted">Fijate dónde queda y tocá ese punto en el mapa de acá.</span></span></a>';
+      if (state === 'link') remote = linkMsg;
+      else if (state === 'picking') remote = '<p class="app-suggest__state">Ubicándola…</p>';
+      else if (state === 'loading') remote = '<p class="app-suggest__state">Buscando en el mapa…</p>';
+      else if (state === 'error') remote = '<p class="app-suggest__state">No pude buscar en el mapa. ¿Tenés conexión?</p>' + gmaps;
+      else if (state === 'done' && !results.length) remote = '<p class="app-suggest__state">No aparece en el mapa. Buscala en Google Maps, o pegá acá el link largo de Maps (el de la barra del navegador).</p>' + gmaps;
       else if (state === 'done') {
-        remote = '<p class="app-suggest__head">En el mapa</p>' + results.map(function (pl, i) {
+        remote = '<p class="app-suggest__head">' + (results[0].fromLink ? 'Del link de Google Maps' : 'En el mapa') + '</p>' + results.map(function (pl, i) {
           return '<button type="button" class="app-suggest__item" data-place="' + i + '">' + icon(pl.food ? 'cup' : 'map') +
             '<span class="app-suggest__txt"><b>' + esc(pl.name || pl.address) + '</b><span class="dag-muted">' + esc(pl.name ? sub(pl) : [pl.barrio, pl.city].filter(Boolean).join(', ')) + '</span></span>' +
             '<span class="app-suggest__km">' + fmtKm(pl.km) + '</span></button>';
-        }).join('');
+        }).join('') + (results[0].fromLink ? '' : '<p class="app-suggest__head">¿No es ninguna?</p>' + gmaps);
       }
       list.innerHTML = local + remote;
       list.hidden = !(local || remote);
     }
+    // Pegaron un link de Google Maps: se lee el link en vez de buscar.
+    function fromLink(q) {
+      clearTimeout(timer); if (ctrl) ctrl.abort(); last = '';
+      var pl = parseMapsLink(q);
+      if (pl) {
+        results = [{ name: pl.name, address: '', barrio: '', city: '', country: '', lat: pl.lat, lng: pl.lng, kind: 'link', food: 3, placeId: '', fromLink: true, km: null }];
+        paint('done');
+        return;
+      }
+      results = [];
+      linkMsg = '<p class="app-suggest__state">' + (SHORT_LINK.test(q)
+        ? 'Ese link corto no trae la ubicación. Abrilo, y copiá el link largo de la barra del navegador (el que dice google.com/maps/place/…). O tocá el lugar en el mapa.'
+        : 'Ese link de Google Maps no trae la ubicación. Abrí el lugar en Maps y copiá el link de la barra del navegador.') + '</p>';
+      paint('link');
+    }
     input.addEventListener('input', function () {
       var q = input.value.trim();
+      if (isMapsLink(q)) { fromLink(q); return; }
       clearTimeout(timer);
       if (q.length < 3) { results = []; last = ''; if (ctrl) ctrl.abort(); paint(''); return; }
       paint(q === last ? 'done' : 'loading');
@@ -142,7 +193,17 @@
     });
     list.addEventListener('click', function (e) {
       var b = e.target.closest('[data-place]');
-      if (b) { var pl = results[+b.getAttribute('data-place')]; close(); opts.onPick(pl); return; }
+      if (b) {
+        var pl = results[+b.getAttribute('data-place')];
+        if (!pl.fromLink) { close(); opts.onPick(pl); return; }
+        // del link: nombre y punto exactos; dirección y barrio los completa OpenStreetMap
+        paint('picking');
+        var done = function () { close(); input.value = ''; opts.onPick(pl); };
+        reverse(pl.lat, pl.lng).then(function (r) {
+          if (r) { pl.address = r.address || (pl.name ? '' : r.name) || ''; pl.barrio = r.barrio; pl.city = r.city; }
+        }).catch(function () { /* sin dirección, igual sirve */ }).then(done);
+        return;
+      }
       var l = e.target.closest('[data-local]');
       if (l && opts.onLocal) { close(); opts.onLocal(l); }
     });
@@ -151,5 +212,5 @@
     return { close: close };
   }
 
-  window.Geo = { BA: BA, search: search, reverse: reverse, attach: attach, km: km, fmtKm: fmtKm, sub: sub };
+  window.Geo = { BA: BA, search: search, parseMapsLink: parseMapsLink, mapsSearchUrl: mapsSearchUrl, reverse: reverse, attach: attach, km: km, fmtKm: fmtKm, sub: sub };
 })();

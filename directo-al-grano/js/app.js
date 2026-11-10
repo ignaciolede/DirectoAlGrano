@@ -624,7 +624,7 @@
 
     function hint() {
       if (!cfg.hintEl) return;
-      cfg.hintEl.textContent = !m ? '' : point ? 'Listo. Si el pin no quedó justo, arrastralo o tocá el lugar exacto.' : 'Buscala por nombre arriba o por dirección acá. También podés tocar el mapa.';
+      cfg.hintEl.textContent = !m ? '' : point ? 'Listo. Si el pin no quedó justo, arrastralo o tocá el lugar exacto.' : 'Buscala por nombre (o pegá el link largo de Google Maps). Si no aparece, tocá el lugar en el mapa.';
     }
     function sync(center) {
       if (m) m.setPin(point ? point.lat : null, point ? point.lng : null, cfg.pin, function (ll) { setPoint(ll, true); });
@@ -760,7 +760,7 @@
         if (ch) ch.addEventListener('click', function () { st.cafeId = null; st.name = ''; loc.clear(); renderCafe(); box.querySelector('#rv-name').focus(); });
       } else {
         box.innerHTML = '<div class="app-pop"><label class="dag-field"><span class="app-field-label">Nombre</span>' +
-          '<span class="dag-search app-search-input">' + ic('search') + '<input id="rv-name" placeholder="Buscala por nombre" autocomplete="off" value="' + esc(st.name) + '"></span></label>' +
+          '<span class="dag-search app-search-input">' + ic('search') + '<input id="rv-name" placeholder="Buscala por nombre o pegá un link de Maps" autocomplete="off" value="' + esc(st.name) + '"></span></label>' +
           '<div id="rv-suggest" class="app-suggest app-suggest--pop" hidden></div></div>' +
           '<p class="app-error" id="rv-name-err" hidden>Poné el nombre de la cafetería.</p>';
         var name = box.querySelector('#rv-name');

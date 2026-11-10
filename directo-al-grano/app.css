@@ -297,3 +297,6 @@ button.app-rowbtn { appearance: none; border: 0; width: 100%; font: inherit; col
 .app-handle:focus-within .app-handle__at { color: var(--brand); }
 [data-state="ok"] { color: var(--bean-green); font-weight: 600; }
 [data-state="bad"] { color: var(--danger); font-weight: 600; }
+
+.app-suggest__gmaps { text-decoration: none; }
+.app-suggest__gmaps .app-suggest__txt span { white-space: normal; }
