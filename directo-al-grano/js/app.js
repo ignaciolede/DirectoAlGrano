@@ -165,11 +165,11 @@
       '<span class="dag-logo"><span class="dag-logo__mark" style="width:30px;height:30px">' + DAG.mark() + '</span>' +
       '<span class="dag-logo__word" style="font-size:20px">Directo <em>al</em> grano</span></span>' +
       '<span class="dag-row" style="flex-wrap:nowrap">' +
-      (cafes.length ? '<button type="button" class="dag-btn dag-btn--secondary dag-btn--icon" id="rk-search-btn" aria-label="Buscar" aria-expanded="' + ui.searchOpen + '">' + ic('search') + '</button>' : '') +
+      (cafes.length ? '<button type="button" class="dag-btn dag-btn--ghost dag-btn--icon" id="rk-search-btn" aria-label="Buscar" aria-expanded="' + ui.searchOpen + '">' + ic('search') + '</button>' : '') +
       '<button type="button" class="dag-btn dag-btn--ghost dag-btn--icon" id="rk-more" aria-label="Ajustes">' + ic('more') + '</button></span></div>';
 
     if (!cafes.length) {
-      view.innerHTML = head + '<h1 class="dag-display">Ranking</h1>' + rankSeg('ranking') +
+      view.innerHTML = head + '<h1 class="app-sr">Ranking</h1>' + rankSeg('ranking') +
         '<div class="app-empty"><span class="app-empty__mark">' + DAG.mark() + '</span>' +
         '<p>Todavía no reseñaste nada. El primer cortado corre por tu cuenta.</p>' +
         '<a class="dag-btn" href="#/nueva">' + ic('plus') + 'Nueva review</a>' +
@@ -184,7 +184,7 @@
       return;
     }
 
-    view.innerHTML = head + '<h1 class="dag-display" style="margin-bottom:12px">Ranking</h1>' + rankSeg('ranking') +
+    view.innerHTML = head + '<h1 class="app-sr">Ranking</h1>' + rankSeg('ranking') +
       '<div class="app-searchrow" ' + (ui.searchOpen ? '' : 'hidden') + '><label class="dag-search">' + ic('search') +
       '<input id="rk-q" type="search" placeholder="Buscá por nombre o barrio" value="' + esc(ui.rankQuery) + '" autocomplete="off"></label></div>' +
       '<div class="dag-chips dag-chips--scroll app-filters" data-single role="group" aria-label="Ordenar por">' +
@@ -412,7 +412,7 @@
   var cache = { global: null };
 
   VIEWS.global = function () {
-    view.innerHTML = logoHead() + '<h1 class="dag-display" style="margin-bottom:12px">Ranking</h1>' + rankSeg('global') +
+    view.innerHTML = logoHead() + '<h1 class="app-sr">Ranking</h1>' + rankSeg('global') +
       '<p class="dag-muted app-sub app-sub--top">Las cafeterías de toda la app. La nota es el promedio entre personas: cada una cuenta una vez, vaya una vez o veinte.</p>' +
       '<div id="gl-list"></div>';
     bindSettings();
@@ -443,7 +443,7 @@
 
   VIEWS.personas = function () {
     var me = S.auth.user();
-    view.innerHTML = logoHead() + '<h1 class="dag-display" style="margin-bottom:12px">Ranking</h1>' + rankSeg('personas') +
+    view.innerHTML = logoHead() + '<h1 class="app-sr">Ranking</h1>' + rankSeg('personas') +
       '<label class="dag-search app-searchrow">' + ic('search') +
       '<input id="ps-q" type="search" placeholder="Buscá por @usuario" autocomplete="off" autocapitalize="none" spellcheck="false" aria-label="Buscar personas por nombre de usuario" value="' + esc(ui.peopleQuery || '') + '"></label>' +
       (S.community.needsUsername() ? '<p class="app-hint app-gap">Todavía no elegiste tu @, así que nadie te encuentra. <button type="button" class="app-linkbtn" data-username>Elegilo</button></p>' : '') +
