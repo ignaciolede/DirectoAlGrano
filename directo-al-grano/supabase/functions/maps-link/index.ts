@@ -3,7 +3,8 @@
 // la app la lee de ahí. Desde el navegador no se puede seguir el redirect (Google no lo permite), por eso esto.
 //
 // Solo sigue redirects (no descarga páginas) y solo a dominios de Google: no sirve para abrir cualquier URL.
-// Requiere sesión: Supabase verifica el JWT del usuario antes de llamarla (verify_jwt por defecto).
+// Requiere sesión: la propia función le pregunta a Supabase Auth si el token es de un usuario
+// (así anda igual tenga o no activado "Verify JWT").
 //
 // Deploy (una vez): Dashboard → Edge Functions → Deploy a new function → Via Editor,
 // nombre "maps-link", pegá este archivo y Deploy. O con la CLI: supabase functions deploy maps-link
@@ -21,9 +22,29 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...cors, 'Content-Type': 'application/json' } });
 }
 
+// ¿El token es de un usuario con sesión? (la clave pública sola no alcanza)
+async function signedIn(req: Request): Promise<boolean> {
+  const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '').trim();
+  const base = Deno.env.get('SUPABASE_URL');
+  const apikey = req.headers.get('apikey') || Deno.env.get('SUPABASE_ANON_KEY') || '';
+  if (!token || !base || !apikey || token === apikey) return false;
+  try {
+    const r = await fetch(base + '/auth/v1/user', {
+      headers: { apikey, Authorization: 'Bearer ' + token },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!r.ok) { await r.body?.cancel(); return false; }
+    const u = await r.json();
+    return !!u?.id;
+  } catch {
+    return false;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return json({ error: 'method' }, 405);
+  if (!(await signedIn(req))) return json({ error: 'auth' }, 401);
 
   let u: URL;
   try {

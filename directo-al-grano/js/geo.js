@@ -199,6 +199,7 @@
         if (mine !== linkSeq || input.value.trim() !== q) return;
         linkFail(err && err.missing ? 'Para leer links cortos falta activar la función maps-link en Supabase. ' + COPY_TIP
           : err && err.notFound ? 'Ese link no existe o venció. Compartí el lugar de nuevo desde Maps.'
+          : err && err.auth ? 'Tu sesión venció. Cerrá sesión y volvé a entrar para leer links.'
           : 'No pude abrir el link. ¿Tenés conexión? ' + COPY_TIP);
       });
     }

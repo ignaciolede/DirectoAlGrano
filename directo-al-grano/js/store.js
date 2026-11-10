@@ -442,7 +442,7 @@
         if (res.error) {
           var status = res.error.context && res.error.context.status;
           var e = new Error(res.error.message || 'maps-link');
-          e.missing = status === 404; e.notFound = status === 422;
+          e.missing = status === 404; e.notFound = status === 422; e.auth = status === 401;
           throw e;
         }
         var d = res.data || {};
