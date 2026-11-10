@@ -225,6 +225,7 @@ body.no-tabbar .app-toast { bottom: calc(96px + env(safe-area-inset-bottom)); }
 /* ---------- cuenta: entrar, registro, recuperar ---------- */
 .app-boot { min-height: 70dvh; display: grid; place-items: center; }
 .app-boot .app-empty__mark { width: 56px; height: 56px; animation: app-breathe 1.4s ease-in-out infinite; }
+.app-boot__mark { display: block; width: 56px; height: 56px; animation: app-breathe 1.4s ease-in-out infinite; }
 @keyframes app-breathe { 50% { opacity: .35; } }
 .app-auth { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-8); }
 .app-auth__logo { margin-bottom: var(--space-6); }

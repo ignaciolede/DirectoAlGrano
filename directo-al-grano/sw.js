@@ -2,7 +2,7 @@
    Guarda la cáscara de la app para que abra rápido y sin señal desde la pantalla de inicio.
    Siempre pide primero a la red (así cada cambio publicado llega al toque) y usa la copia solo si no hay conexión.
    No toca Supabase, los tiles del mapa ni los CDN: eso va directo a la red. */
-var CACHE = 'dag-shell-v1';
+var CACHE = 'dag-shell-v2';
 var SHELL = [
   './',
   './index.html',
@@ -18,7 +18,8 @@ var SHELL = [
   '../design-system/tokens.css',
   '../design-system/components/bundle.css',
   '../design-system/components/bundle.js',
-  '../design-system/assets/Logos/app-icon.svg'
+  '../design-system/assets/Logos/app-icon.svg',
+  '../design-system/assets/Logos/mark-tostado.svg'
 ];
 
 self.addEventListener('install', function (e) {
