@@ -53,27 +53,41 @@
 
   // ---------- filas <-> objetos de la app ----------
   function str(v) { return v == null ? '' : String(v); }
-  // place_id solo viaja si hay uno y la columna existe (supabase/comunidad.sql la agrega)
-  var hasPlaceCol = true;
+  // Columnas opcionales: solo viajan si hay valor y la base las tiene.
+  //   place_id (supabase/comunidad.sql): id de OpenStreetMap
+  //   maps_url, google_place_id, google_checked_at (supabase/mapas.sql): link de Maps pegado y lugar de Google
+  var OPTIONAL = ['place_id', 'maps_url', 'google_place_id', 'google_checked_at'];
+  var missingCol = { cafes: {}, wishlist: {}, visits: {} };
+  function opt(table, row, col, v) { if (v && !missingCol[table][col]) row[col] = v; }
+  function googleFields(table, row, o) {
+    opt(table, row, 'maps_url', o.mapsUrl);
+    opt(table, row, 'google_place_id', o.googleId);
+    opt(table, row, 'google_checked_at', o.googleId ? o.googleAt || Date.now() : 0);
+  }
   function cafeRow(c) {
     var row = { id: c.id, name: c.name, barrio: str(c.barrio), address: str(c.address), lat: coord(c.lat), lng: coord(c.lng), created_at: c.createdAt || Date.now() };
-    if (c.placeId && hasPlaceCol) row.place_id = c.placeId;
+    opt('cafes', row, 'place_id', c.placeId);
+    googleFields('cafes', row, c);
     return row;
   }
   function cafeFrom(r) {
-    return { id: r.id, name: r.name, barrio: str(r.barrio), address: str(r.address), lat: r.lat, lng: r.lng, placeId: str(r.place_id), createdAt: Number(r.created_at) };
+    return { id: r.id, name: r.name, barrio: str(r.barrio), address: str(r.address), lat: r.lat, lng: r.lng, placeId: str(r.place_id),
+      mapsUrl: str(r.maps_url), googleId: str(r.google_place_id), googleAt: Number(r.google_checked_at) || 0, createdAt: Number(r.created_at) };
   }
-  // Si la base todavía no tiene la columna place_id, se reintenta sin ella (y no se vuelve a mandar).
-  function cafeWrite(rows, make) {
+  // Si a la base le falta una columna opcional, se reintenta sin ella (y no se vuelve a mandar).
+  // Supabase avisa: "Could not find the 'maps_url' column of 'cafes' in the schema cache"
+  function optionalCols(table, rows, make) {
     return make(rows).then(function (res) {
-      if (res && res.error && /place_id/.test(res.error.message || '')) {
-        hasPlaceCol = false;
-        (Array.isArray(rows) ? rows : [rows]).forEach(function (r) { delete r.place_id; });
-        return make(rows);
-      }
-      return res;
+      var msg = (res && res.error && res.error.message) || '';
+      var m = msg.match(/'([a-z_]+)' column/) || msg.match(/column "?(?:[a-z_]+\.)?([a-z_]+)"? (?:of relation [^ ]+ )?does not exist/);
+      var col = m && OPTIONAL.indexOf(m[1]) >= 0 ? m[1] : '';
+      if (!col || missingCol[table][col]) return res;
+      missingCol[table][col] = true;
+      (Array.isArray(rows) ? rows : [rows]).forEach(function (r) { delete r[col]; });
+      return optionalCols(table, rows, make);
     });
   }
+  function cafeWrite(rows, make) { return optionalCols('cafes', rows, make); }
   function visitRow(v) {
     return {
       id: v.id, cafe_id: v.cafeId, score: v.score, visited_on: v.date,
@@ -89,15 +103,18 @@
     };
   }
   function wishRow(w) {
-    return {
+    var row = {
       id: w.id, name: w.name, barrio: str(w.barrio), why: str(w.why), address: str(w.address),
       lat: coord(w.lat), lng: coord(w.lng), saved_at: w.savedAt || today(), created_at: w.createdAt || Date.now()
     };
+    googleFields('wishlist', row, w);
+    return row;
   }
   function wishFrom(r) {
     return {
       id: r.id, name: r.name, barrio: str(r.barrio), why: str(r.why), address: str(r.address),
-      lat: r.lat, lng: r.lng, savedAt: r.saved_at, createdAt: Number(r.created_at)
+      lat: r.lat, lng: r.lng, mapsUrl: str(r.maps_url), googleId: str(r.google_place_id), googleAt: Number(r.google_checked_at) || 0,
+      savedAt: r.saved_at, createdAt: Number(r.created_at)
     };
   }
   var TO_ROW = { cafes: cafeRow, visits: visitRow, wishlist: wishRow };
@@ -122,12 +139,12 @@
 
   function insert(table, obj) {
     var row = TO_ROW[table](obj);
-    run([function () { return cafeWrite(row, function (r) { return sb.from(table).insert(r); }); }]);
+    run([function () { return optionalCols(table, row, function (r) { return sb.from(table).insert(r); }); }]);
   }
   // Import: una tanda por tabla.
   function insertSteps(b) {
     return ['cafes', 'visits', 'wishlist'].filter(function (t) { return b[t].length; }).map(function (t) {
-      return function () { return cafeWrite(b[t].map(TO_ROW[t]), function (r) { return sb.from(t).insert(r); }); };
+      return function () { return optionalCols(t, b[t].map(TO_ROW[t]), function (r) { return sb.from(t).insert(r); }); };
     });
   }
 
@@ -245,13 +262,16 @@
 
   // ---------- escritura ----------
   function addCafe(data) {
-    var c = { id: uid(), name: data.name.trim(), barrio: (data.barrio || '').trim(), address: (data.address || '').trim(), lat: coord(data.lat), lng: coord(data.lng), placeId: data.placeId || '', createdAt: stamp() };
+    var c = { id: uid(), name: data.name.trim(), barrio: (data.barrio || '').trim(), address: (data.address || '').trim(), lat: coord(data.lat), lng: coord(data.lng), placeId: data.placeId || '', mapsUrl: data.mapsUrl || '', googleId: data.googleId || '', googleAt: data.googleId ? Date.now() : 0, createdAt: stamp() };
     db.cafes.push(c); insert('cafes', c); return c;
   }
   function updateCafe(id, patch) {
     var c = cafe(id); if (!c) return null;
     Object.keys(patch).forEach(function (k) { if (patch[k] !== undefined) c[k] = patch[k]; });
+    if ('googleId' in patch && patch.googleId !== undefined) c.googleAt = patch.googleId ? (patch.googleAt || Date.now()) : 0;
     var row = cafeRow(c); delete row.id; delete row.created_at;
+    // borrar el lugar de Google (movieron el pin a mano): se manda null explícito
+    if (!c.googleId && !missingCol.cafes.google_place_id) { row.google_place_id = null; row.google_checked_at = null; }
     run([function () { return cafeWrite(row, function (r) { return sb.from('cafes').update(r).eq('id', id); }); }]);
     return c;
   }
@@ -285,9 +305,44 @@
     run([function () { return sb.from('cafes').delete().eq('id', id); }]);
   }
 
+  // ---------- ubicaciones de Google ----------
+  // Las condiciones de Google permiten guardar coordenadas de Places hasta 30 días; el id del lugar, sin límite.
+  // Al entrar, las que tienen más de 25 días se piden de nuevo por su id (solo la ubicación) y se actualizan.
+  var GOOGLE_TTL = 25 * 24 * 3600 * 1000, refreshing = null;
+  function refreshGoogle() {
+    if (!sb || !user || refreshing) return refreshing || Promise.resolve(false);
+    var now = Date.now();
+    var due = db.cafes.map(function (o) { return { t: 'cafes', o: o }; }).concat(db.wishlist.map(function (o) { return { t: 'wishlist', o: o }; }))
+      .filter(function (x) { return x.o.googleId && !missingCol[x.t].google_place_id && now - (x.o.googleAt || 0) > GOOGLE_TTL; });
+    if (!due.length) return Promise.resolve(false);
+    var ids = []; due.forEach(function (x) { if (ids.indexOf(x.o.googleId) < 0) ids.push(x.o.googleId); });
+    ids = ids.slice(0, 20); // de a 20 por vez; el resto, la próxima
+    refreshing = sb.functions.invoke('maps-link', { body: { refresh: ids } }).then(function (res) {
+      if (res.error || !res.data || !res.data.places) return false; // sin función o sin clave: se reintenta la próxima vez
+      var got = res.data.places, changed = false;
+      due.forEach(function (x) {
+        var o = x.o, id = o.googleId;
+        if (!(id in got)) return; // Google no respondió por este: se reintenta
+        var p = got[id], row = {};
+        if (p && typeof p.lat === 'number') {
+          changed = changed || o.lat !== coord(p.lat) || o.lng !== coord(p.lng);
+          o.lat = coord(p.lat); o.lng = coord(p.lng); o.googleAt = now;
+          row = { lat: o.lat, lng: o.lng, google_checked_at: now };
+        } else {
+          // el lugar ya no existe en Google (cerró): la ubicación queda, sin id para renovar
+          o.googleId = ''; o.googleAt = 0;
+          row = { google_place_id: null, google_checked_at: null };
+        }
+        run([function () { return optionalCols(x.t, row, function (r) { return sb.from(x.t).update(r).eq('id', o.id); }); }]);
+      });
+      return changed;
+    }, function () { return false; }).then(function (ch) { refreshing = null; return ch; });
+    return refreshing;
+  }
+
   function wish(id) { return db.wishlist.find(function (w) { return w.id === id; }) || null; }
   function addWish(data) {
-    var w = { id: uid(), name: data.name.trim(), barrio: (data.barrio || '').trim(), why: (data.why || '').trim(), address: (data.address || '').trim(), lat: coord(data.lat), lng: coord(data.lng), savedAt: today(), createdAt: stamp() };
+    var w = { id: uid(), name: data.name.trim(), barrio: (data.barrio || '').trim(), why: (data.why || '').trim(), address: (data.address || '').trim(), lat: coord(data.lat), lng: coord(data.lng), mapsUrl: data.mapsUrl || '', googleId: data.googleId || '', googleAt: data.googleId ? Date.now() : 0, savedAt: today(), createdAt: stamp() };
     db.wishlist.unshift(w); insert('wishlist', w); return w;
   }
   function deleteWish(id) {
@@ -436,17 +491,18 @@
       return sb.rpc('username_available', { u: u }).then(function (res) { return res.error ? null : !!res.data; }, function () { return null; });
     },
     // Abre un link corto de Google Maps con la función maps-link (supabase/functions/maps-link). → Promise<[urls]>
-    resolveMapsLink: function (url) {
+    // También busca por nombre en Google Places si la función tiene la clave. body: { url, near } o { q, near }
+    // → Promise<{ chain, name, places: [{ name, address, barrio, city, lat, lng, gid }], noKey }>
+    resolveMapsLink: function (body) {
       if (!sb || !user) return Promise.reject(new Error('sin sesión'));
-      return sb.functions.invoke('maps-link', { body: { url: url } }).then(function (res) {
+      return sb.functions.invoke('maps-link', { body: body }).then(function (res) {
         if (res.error) {
           var status = res.error.context && res.error.context.status;
           var e = new Error(res.error.message || 'maps-link');
           e.missing = status === 404; e.notFound = status === 422; e.auth = status === 401;
           throw e;
         }
-        var d = res.data || {};
-        return d.chain && d.chain.length ? d.chain : d.url ? [d.url] : [];
+        return res.data || {};
       });
     },
     // Tenés que elegir @ si la comunidad está activa y todavía no tenés uno.
@@ -494,6 +550,7 @@
     visits: function () { return db.visits.slice().sort(byDateDesc); },
     wishlist: function () { return db.wishlist.slice(); },
     cafe: cafe, visit: visit, visitsOf: visitsOf, stats: stats, ranking: ranking, rankOf: rankOf, findCafeByName: findCafeByName,
+    refreshGoogle: refreshGoogle,
     addCafe: addCafe, updateCafe: updateCafe, addVisit: addVisit, updateVisit: updateVisit, deleteVisit: deleteVisit, deleteCafe: deleteCafe,
     wish: wish, addWish: addWish, deleteWish: deleteWish,
     prefs: prefs, setPref: setPref, exportJSON: exportJSON, importJSON: importJSON, reset: reset,

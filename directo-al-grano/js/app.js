@@ -396,7 +396,7 @@
           if (e.target.closest('a[href^="#/"]')) { navigatedInApp = true; close(); return; }
           if (e.target.closest('[data-review]')) { close(); ui.pendingPlace = pl; go('#/nueva?lugar=1'); return; }
           if (e.target.closest('[data-map]')) {
-            close(); ui.mapPlace = { name: pl.name, address: pl.address, barrio: pl.barrio, lat: pl.lat, lng: pl.lng, placeId: pl.placeId };
+            close(); ui.mapPlace = { name: pl.name, address: pl.address, barrio: pl.barrio, lat: pl.lat, lng: pl.lng, placeId: pl.placeId, googleId: pl.gid || '', mapsUrl: pl.mapsUrl || '' };
             ui.mapSel = 'place'; ui.mapFilter = 'todas'; go('#/mapa'); return;
           }
           var w = e.target.closest('[data-wish]');
@@ -547,9 +547,11 @@
       html += '<div class="dag-card app-food-card app-gap"><span class="app-food-card__icon">' + ic('food') + '</span><div style="flex:1;min-width:0"><p class="app-strong">' + esc(s.lastFood.name || 'Algo rico') + '</p>' +
         (s.lastFood.text ? '<p class="dag-cafe__meta">' + esc(s.lastFood.text) + '</p>' : '') + '</div>' + (s.lastFood.score ? scoreCol(s.lastFood.score, 'dag-score--sm') : '') + '</div>';
     }
-    if (c.address || hasLL(c)) {
-      html += '<div class="dag-card app-place app-gap"><span class="app-place__icon">' + ic('map') + '</span><p class="app-place__addr">' + esc(c.address || 'Marcada en el mapa') + (c.barrio ? '<span class="dag-muted">, ' + esc(c.barrio) + '</span>' : '') + '</p>' +
-        '<a class="dag-btn dag-btn--secondary dag-btn--icon" href="' + routeUrl(c) + '" target="_blank" rel="noopener" aria-label="Cómo llegar">' + ic('route') + '</a></div>';
+    if (c.address || hasLL(c) || c.mapsUrl) {
+      var gm = c.mapsUrl && (c.address || hasLL(c)); // con ubicación y link: dos botones (Maps y cómo llegar)
+      html += '<div class="dag-card app-place app-gap"><span class="app-place__icon">' + ic('map') + '</span><p class="app-place__addr">' + esc(c.address || (hasLL(c) ? 'Marcada en el mapa' : 'Guardada con link de Google Maps')) + (c.barrio ? '<span class="dag-muted">, ' + esc(c.barrio) + '</span>' : '') + '</p>' +
+        (gm ? '<a class="dag-btn dag-btn--ghost dag-btn--icon" href="' + esc(safeUrl(c.mapsUrl)) + '" target="_blank" rel="noopener" aria-label="Abrir en Google Maps">' + ic('map') + '</a>' : '') +
+        '<a class="dag-btn dag-btn--secondary dag-btn--icon" href="' + esc(routeUrl(c)) + '" target="_blank" rel="noopener" aria-label="' + (c.address || hasLL(c) ? 'Cómo llegar' : 'Abrir en Google Maps') + '">' + ic('route') + '</a></div>';
     }
 
     html += '<section class="dag-section app-visits"><div class="dag-section__head"><p class="dag-label">Visitas</p></div><div class="dag-stack" style="gap:8px">' +
@@ -564,6 +566,7 @@
   };
 
   function routeUrl(c) {
+    if (!hasLL(c) && !c.address && c.mapsUrl) return safeUrl(c.mapsUrl); // solo el link de Google Maps
     if (typeof c.lat === 'number' && typeof c.lng === 'number') return 'https://www.google.com/maps/dir/?api=1&destination=' + c.lat + ',' + c.lng;
     return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent([c.address, c.barrio, 'Buenos Aires'].filter(Boolean).join(', '));
   }
@@ -606,6 +609,8 @@
   }
 
   // ---------- ubicación real: buscador + mapa + pin movible ----------
+  // un link guardado solo se abre si es https (cleanLink los guarda así)
+  function safeUrl(u) { return /^https:\/\/[^\s"'<>]+$/i.test(u || '') ? u : '#'; }
   function hasLL(o) { return !!o && typeof o.lat === 'number' && typeof o.lng === 'number'; }
   function pinCup() { return '<span class="dag-pin dag-pin--pick"><span class="dag-pin__body">' + ic('cup') + '</span><span class="dag-pin__tip"></span></span>'; }
   function pinWish() { return '<span class="dag-pin dag-pin--wish"><span class="dag-pin__body">' + ic('wishlist') + '</span><span class="dag-pin__tip"></span></span>'; }
@@ -742,12 +747,17 @@
   function placeFields(cfg) {
     var point = hasLL(cfg.point) ? { lat: cfg.point.lat, lng: cfg.point.lng } : null;
     var placeId = (cfg.point && cfg.point.placeId) || '', barrio = (cfg.point && cfg.point.barrio) || '';
+    var mapsUrl = cfg.mapsUrl || ''; // link de Google Maps que pegaron: se guarda aunque no traiga ubicación
+    // id del lugar en Google: con él la ubicación se renueva sola. Si mueven el pin a mano, la ubicación pasa a ser
+    // de ellos y se borra (si no, la renovación les pisaría el pin).
+    var googleId = (cfg.point && cfg.point.googleId) || '';
     var addr = cfg.addrInput, addrTouched = !!addr.value;
     var m = MapView.mount(cfg.mapEl, { onTap: function (ll) { setPoint(ll); } });
 
     function hint() {
       if (!cfg.hintEl) return;
       cfg.hintEl.textContent = !m ? '' : point ? 'Listo. Si el pin no quedó justo, arrastralo o tocá el lugar exacto.'
+        : mapsUrl ? 'Link de Google Maps guardado. Falta dónde queda: tocá «Marcar en el mapa» o pegá la dirección arriba.'
         : 'Si no aparece por nombre: pegá arriba la dirección copiada de Google Maps, o marcala a mano en el mapa.';
     }
     // "Estoy acá": la ubicación del teléfono (para reseñar desde la cafetería)
@@ -788,6 +798,7 @@
     // drag = corrección fina del pin: sigue siendo el mismo lugar
     function setPoint(ll, drag) {
       point = { lat: ll.lat, lng: ll.lng }; sync(false);
+      googleId = '';
       if (drag && placeId) return;
       placeId = '';
       var asked = point;
@@ -800,6 +811,9 @@
       }).catch(function () { /* sin conexión: queda el pin sin dirección */ });
     }
     function applyPlace(pl) {
+      if (pl.mapsUrl) mapsUrl = pl.mapsUrl;
+      if (!hasLL(pl)) { hint(); return; } // solo el link: la ubicación se marca después
+      googleId = pl.gid || '';
       addr.value = pl.address || pl.name || ''; addrTouched = false;
       barrio = pl.barrio || barrio;
       placeId = pl.placeId || '';
@@ -819,10 +833,13 @@
       point: function () { return point; },
       placeId: function () { return placeId; },
       barrio: function () { return barrio; },
+      mapsUrl: function () { return mapsUrl; },
+      googleId: function () { return point ? googleId : ''; },
+      setMapsUrl: function (u) { mapsUrl = u || ''; hint(); },
       applyPlace: applyPlace,
-      clear: function () { point = null; placeId = ''; barrio = ''; addr.value = ''; addrTouched = false; sync(false); },
+      clear: function () { point = null; placeId = ''; barrio = ''; mapsUrl = ''; googleId = ''; addr.value = ''; addrTouched = false; sync(false); },
       setExisting: function (c) {
-        addr.value = c.address || ''; addrTouched = !!c.address; placeId = c.placeId || ''; barrio = c.barrio || '';
+        addr.value = c.address || ''; addrTouched = !!c.address; placeId = c.placeId || ''; barrio = c.barrio || ''; mapsUrl = c.mapsUrl || ''; googleId = c.googleId || '';
         point = hasLL(c) ? { lat: c.lat, lng: c.lng } : null; sync(true);
       },
       near: function () { return point || (m ? m.center() : Geo.BA); },
@@ -838,9 +855,10 @@
     var st = {
       cafeId: o.cafeId && S.cafe(o.cafeId) ? o.cafeId : null,
       name: seed ? seed.name || '' : '', barrio: seed ? seed.barrio || '' : '', placeId: seed ? seed.placeId || '' : '',
-      address: seed ? seed.address || '' : '', lat: seed ? seed.lat : null, lng: seed ? seed.lng : null
+      address: seed ? seed.address || '' : '', lat: seed ? seed.lat : null, lng: seed ? seed.lng : null,
+      mapsUrl: seed ? seed.mapsUrl || '' : '', googleId: seed ? seed.googleId || seed.gid || '' : ''
     };
-    if (st.cafeId) { var c0 = S.cafe(st.cafeId); st.address = c0.address; st.lat = c0.lat; st.lng = c0.lng; st.barrio = c0.barrio; st.placeId = c0.placeId; }
+    if (st.cafeId) { var c0 = S.cafe(st.cafeId); st.address = c0.address; st.lat = c0.lat; st.lng = c0.lng; st.barrio = c0.barrio; st.placeId = c0.placeId; st.googleId = c0.googleId; st.mapsUrl = c0.mapsUrl; }
     var food = v.food || null;
     // un origen viejo que ya no está en la lista se sigue mostrando, para no perderlo al editar
     var origins = !v.origin || S.BEAN.origin.indexOf(v.origin) >= 0 ? S.BEAN.origin : S.BEAN.origin.concat([v.origin]);
@@ -895,7 +913,7 @@
     var loc = placeFields({
       mapEl: form.querySelector('#rv-map'), hintEl: form.querySelector('#rv-map-hint'), hereBtn: form.querySelector('#rv-here'), pickBtn: form.querySelector('#rv-pick'),
       addrInput: form.querySelector('#rv-address'), addrList: form.querySelector('#rv-addr-suggest'),
-      pin: pinCup(), point: hasLL(st) ? st : null
+      pin: pinCup(), point: hasLL(st) ? st : null, mapsUrl: st.mapsUrl
     });
     cleanup.push(loc.destroy);
 
@@ -940,10 +958,12 @@
             var mine = pl.name && S.cafes().find(function (c) {
               return (pl.placeId && c.placeId === pl.placeId) || (c.name.toLowerCase() === pl.name.toLowerCase() && (!hasLL(c) || Geo.km(c, pl) < 0.3));
             });
-            if (mine) { pickExisting(mine); return; }
+            if (mine) { pickExisting(mine); if (pl.mapsUrl && !mine.mapsUrl) loc.setMapsUrl(pl.mapsUrl); return; }
             // si pegaron una dirección en el nombre, se usa para la ubicación y el nombre queda por escribir
             if (pl.name) { name.value = pl.name; st.name = pl.name; } else { name.value = ''; st.name = ''; }
+            loc.setMapsUrl(pl.mapsUrl);
             loc.applyPlace(pl);
+            if (pl.linkOnly && !pl.name) name.focus(); // el link no trajo el nombre: que lo escriban
             form.querySelector('#rv-name-err').hidden = true;
           }
         });
@@ -1030,9 +1050,11 @@
       if (!cafeId) {
         var existing = (placeId && S.cafes().find(function (c) { return c.placeId === placeId; })) || S.findCafeByName(st.name);
         if (existing) cafeId = existing.id;
-        else cafeId = S.addCafe({ name: st.name, barrio: barrio, address: address, placeId: placeId, lat: pt ? pt.lat : null, lng: pt ? pt.lng : null }).id;
+        else cafeId = S.addCafe({ name: st.name, barrio: barrio, address: address, placeId: placeId, mapsUrl: loc.mapsUrl(), googleId: loc.googleId(), lat: pt ? pt.lat : null, lng: pt ? pt.lng : null }).id;
       }
-      var patch = { address: address || undefined, barrio: barrio || undefined, placeId: placeId || undefined };
+      var patch = { address: address || undefined, barrio: barrio || undefined, placeId: placeId || undefined, mapsUrl: loc.mapsUrl() || undefined };
+      // el lugar de Google cambia solo si se tocó la ubicación (un pin a mano lo borra)
+      if (loc.googleId() !== (S.cafe(cafeId).googleId || '')) patch.googleId = loc.googleId();
       if (pt) { patch.lat = Math.round(pt.lat * 1e6) / 1e6; patch.lng = Math.round(pt.lng * 1e6) / 1e6; }
       S.updateCafe(cafeId, patch);
 
@@ -1209,7 +1231,8 @@
             '<p class="dag-wish__meta">' + joinMeta([w.barrio, when]) + '</p>' +
             (w.why ? '<p class="dag-wish__note"><b>Por qué:</b> ' + esc(w.why) + '</p>' : '') + '</div>' +
             '<div class="dag-wish__actions"><a class="dag-btn dag-btn--sm" href="#/nueva?wish=' + w.id + '">' + ic('check') + 'Ya fui</a>' +
-            (hasLL(w) ? '<a class="dag-btn dag-btn--sm dag-btn--secondary" href="#/mapa?foco=wish:' + w.id + '">' + ic('map') + 'Mapa</a>' : '') +
+            (hasLL(w) ? '<a class="dag-btn dag-btn--sm dag-btn--secondary" href="#/mapa?foco=wish:' + w.id + '">' + ic('map') + 'Mapa</a>'
+              : w.mapsUrl ? '<a class="dag-btn dag-btn--sm dag-btn--secondary" href="' + esc(safeUrl(w.mapsUrl)) + '" target="_blank" rel="noopener">' + ic('map') + 'Maps</a>' : '') +
             '<button type="button" class="dag-btn dag-btn--sm dag-btn--ghost app-btn-danger-ghost" data-del="' + w.id + '" aria-label="Sacar ' + esc(w.name) + ' de la wishlist">Sacar</button></div></div>';
         }).join('') + '</div>';
     }
@@ -1249,14 +1272,19 @@
         Geo.attach(name, {
           list: sheet.querySelector('#wf-suggest'), near: loc.near, pasteWhere: 'en Dirección',
           onGmaps: function (q) { wgm.show(q); },
-          onPick: function (pl) { if (pl.name) name.value = pl.name; loc.applyPlace(pl); sheet.querySelector('#wf-err').hidden = true; }
+          onPick: function (pl) {
+            if (pl.name) name.value = pl.name;
+            loc.setMapsUrl(pl.mapsUrl); loc.applyPlace(pl);
+            sheet.querySelector('#wf-err').hidden = true;
+            if (pl.linkOnly && !pl.name) name.focus();
+          }
         });
         sheet.querySelector('#wf').addEventListener('submit', function (e) {
           e.preventDefault();
           var n = name.value.trim();
           if (!n) { sheet.querySelector('#wf-err').hidden = false; name.focus(); return; }
           var pt = loc.point();
-          S.addWish({ name: n, barrio: loc.barrio(), why: sheet.querySelector('#wf-why').value, address: sheet.querySelector('#wf-address').value, lat: pt ? pt.lat : null, lng: pt ? pt.lng : null });
+          S.addWish({ name: n, barrio: loc.barrio(), why: sheet.querySelector('#wf-why').value, address: sheet.querySelector('#wf-address').value, mapsUrl: loc.mapsUrl(), googleId: loc.googleId(), lat: pt ? pt.lat : null, lng: pt ? pt.lng : null });
           done(); render(); toast('Guardada. Ahora no te la olvidás.');
         });
         // el mapa se libera cuando se cierra el sheet
@@ -1570,7 +1598,10 @@
     toast('No se pudo guardar el último cambio. Revisá la conexión.');
   });
 
+  // ubicaciones de Google con más de 25 días: se renuevan en segundo plano (sin redibujar: no corta lo que estés haciendo)
+  function refreshGoogle() { if (S.auth.user() && !S.loadError()) S.refreshGoogle(); }
   S.auth.onChange(function (event, changed) {
+    if (changed) refreshGoogle();
     if (!booted) return;
     if (changed) {
       navigatedInApp = false;
