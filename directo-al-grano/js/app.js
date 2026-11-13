@@ -645,8 +645,10 @@
     }
     function sync() {
       var q = query();
-      btn.hidden = !q;
-      if (!q) { set(false); return; }
+      // con la búsqueda en Google andando, el panel sobra: queda de respaldo si Google no está disponible
+      var off = !q || Geo.googleOn();
+      btn.hidden = off;
+      if (off) { set(false); return; }
       if (!panel.hidden) { clearTimeout(timer); timer = setTimeout(function () { load(query()); }, 700); }
     }
     input.addEventListener('input', sync);
@@ -945,6 +947,8 @@
           list: box.querySelector('#rv-suggest'),
           near: loc.near,
           pasteWhere: 'en Ubicación',
+          google: true,
+          onManual: function () { form.querySelector('#rv-pick').click(); },
           onGmaps: function (q) { gm.show(q); },
           local: function (q) {
             q = q.toLowerCase();
@@ -1191,6 +1195,7 @@
     Geo.attach(q, {
       list: view.querySelector('#mp-results'),
       near: function () { return map ? map.center() : Geo.BA; },
+      google: true,
       local: function (txt) {
         txt = txt.toLowerCase();
         if (!txt) return '';
@@ -1271,6 +1276,8 @@
         var wgm = wireGmaps(sheet, 'wf-gmaps', name);
         Geo.attach(name, {
           list: sheet.querySelector('#wf-suggest'), near: loc.near, pasteWhere: 'en Dirección',
+          google: true,
+          onManual: function () { sheet.querySelector('#wf-pick').click(); },
           onGmaps: function (q) { wgm.show(q); },
           onPick: function (pl) {
             if (pl.name) name.value = pl.name;
