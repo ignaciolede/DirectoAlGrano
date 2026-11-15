@@ -925,20 +925,66 @@
       loc.setExisting(c);
       renderCafe();
     }
+    // "Lugar nuevo" o "Ya fui": con "Ya fui" se elige de la lista de las que ya reseñaste y la nota se promedia.
+    st.mode = 'new';
+    function modeHtml() {
+      if (edit || !S.cafes().length) return '';
+      return '<div class="app-mode" role="group" aria-label="¿Ya fuiste?">' + [['new', 'Lugar nuevo'], ['been', 'Ya fui a este lugar']].map(function (m) {
+        return '<button type="button" class="app-mode__opt" data-mode="' + m[0] + '" aria-pressed="' + (st.mode === m[0]) + '">' + m[1] + '</button>';
+      }).join('') + '</div>';
+    }
+    function beenList(q) {
+      q = (q || '').trim().toLowerCase();
+      var rows = S.cafes().map(function (c) { return { c: c, s: S.stats(c.id) }; })
+        .filter(function (r) { return r.s.n && (!q || r.c.name.toLowerCase().indexOf(q) >= 0 || (r.c.barrio || '').toLowerCase().indexOf(q) >= 0); })
+        .sort(function (a, b) { return a.s.last.date < b.s.last.date ? 1 : a.s.last.date > b.s.last.date ? -1 : a.c.name.localeCompare(b.c.name, 'es'); });
+      if (!rows.length) return '<p class="app-hint">' + (q ? 'Ninguna con ese nombre.' : 'Todavía no reseñaste ninguna.') + '</p>';
+      return rows.map(function (r) {
+        return '<button type="button" class="app-suggest__item app-been__item" data-been="' + r.c.id + '">' + badge(r.s.avg, 'dag-score--sm') +
+          '<span class="app-suggest__txt"><b>' + esc(r.c.name) + '</b><span class="dag-muted">' +
+          joinMeta([r.c.barrio, plural(r.s.n, 'visita', 'visitas'), 'última ' + shortDate(r.s.last.date)]) + '</span></span></button>';
+      }).join('');
+    }
+    function bindMode(box) {
+      box.querySelectorAll('[data-mode]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var m = b.getAttribute('data-mode'); if (m === st.mode) return;
+          st.mode = m; st.name = ''; loc.clear(); renderCafe();
+          var f = box.querySelector(m === 'been' ? '#rv-been-q' : '#rv-name'); if (f) f.focus();
+        });
+      });
+    }
     function renderCafe() {
       var box = form.querySelector('#rv-cafe');
       if (st.cafeId) {
-        var c = S.cafe(st.cafeId);
+        var c = S.cafe(st.cafeId), s = S.stats(c.id);
         box.innerHTML = '<div class="dag-card app-picked"><span class="dag-cafe__thumb">' + ic('cup') + '</span><div style="flex:1;min-width:0"><p class="dag-title">' + esc(c.name) + '</p>' +
-          '<p class="dag-cafe__meta">' + joinMeta([c.barrio, plural(S.stats(c.id).n, 'visita', 'visitas')]) + '</p></div>' +
-          (edit ? '' : '<button type="button" class="dag-btn dag-btn--ghost dag-btn--sm" id="rv-change">Cambiar</button>') + '</div>';
+          '<p class="dag-cafe__meta">' + joinMeta([c.barrio, plural(s.n, 'visita', 'visitas')]) + '</p></div>' +
+          (edit ? '' : '<button type="button" class="dag-btn dag-btn--ghost dag-btn--sm" id="rv-change">Cambiar</button>') + '</div>' +
+          (!edit && s.n ? '<p class="app-hint app-been__note">Hoy tiene ' + num(s.avg) + ' de promedio. Esta visita suma y la nota se recalcula entre las ' + (s.n + 1) + '.</p>' : '');
         var ch = box.querySelector('#rv-change');
-        if (ch) ch.addEventListener('click', function () { st.cafeId = null; st.name = ''; loc.clear(); renderCafe(); box.querySelector('#rv-name').focus(); });
+        if (ch) ch.addEventListener('click', function () {
+          st.cafeId = null; st.name = ''; loc.clear(); renderCafe();
+          var f = box.querySelector(st.mode === 'been' ? '#rv-been-q' : '#rv-name'); if (f) f.focus();
+        });
+      } else if (st.mode === 'been' && !edit) {
+        box.innerHTML = modeHtml() +
+          '<label class="dag-search app-search-input">' + ic('search') + '<input id="rv-been-q" placeholder="Filtrar las que ya reseñaste" autocomplete="off" aria-label="Filtrar cafeterías"></label>' +
+          '<div class="app-suggest app-been" id="rv-been"></div>' +
+          '<p class="app-error" id="rv-name-err" hidden>Elegí a cuál volviste.</p>';
+        bindMode(box);
+        var list = box.querySelector('#rv-been'), bq = box.querySelector('#rv-been-q');
+        list.innerHTML = beenList('');
+        bq.addEventListener('input', function () { list.innerHTML = beenList(bq.value); });
+        list.addEventListener('click', function (e) {
+          var it = e.target.closest('[data-been]'); if (it) pickExisting(S.cafe(it.getAttribute('data-been')));
+        });
       } else {
-        box.innerHTML = '<div class="app-pop"><label class="dag-field"><span class="app-field-label">Nombre</span>' +
+        box.innerHTML = modeHtml() + '<div class="app-pop"><label class="dag-field"><span class="app-field-label">Nombre</span>' +
           '<span class="dag-search app-search-input">' + ic('search') + '<input id="rv-name" placeholder="Buscala por nombre o pegá un link de Maps" autocomplete="off" value="' + esc(st.name) + '"></span></label>' +
           '<div id="rv-suggest" class="app-suggest app-suggest--pop" hidden></div></div>' +
           '<p class="app-error" id="rv-name-err" hidden>Poné el nombre de la cafetería.</p>' + gmapsPanelHtml('rv-gmaps');
+        bindMode(box);
         var name = box.querySelector('#rv-name');
         var gm = wireGmaps(box, 'rv-gmaps', name);
         cleanup.push(gm.destroy);
@@ -1024,7 +1070,7 @@
       var score = sel ? Number(sel.textContent) : null;
       var nameErr = form.querySelector('#rv-name-err');
       var firstErr = null;
-      if (!st.cafeId && !st.name.trim()) { nameErr.hidden = false; firstErr = form.querySelector('#rv-name'); }
+      if (!st.cafeId && !st.name.trim()) { nameErr.hidden = false; firstErr = form.querySelector('#rv-name') || form.querySelector('#rv-been-q'); }
       else if (nameErr) nameErr.hidden = true;
       if (!score) { form.querySelector('#rv-score-err').hidden = false; firstErr = firstErr || form.querySelector('#rv-score-sec'); }
       if (firstErr) {
